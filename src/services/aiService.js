@@ -102,7 +102,10 @@ export const callAI = async (prompt, jsonMode = false, provider = null) => {
   const currentModel = getCurrentModel();
   
   // 使用后端API代理
-  const apiUrl = '/api/ai';
+  // 支持通过环境变量配置 Cloudflare Worker 代理地址
+  // 如果设置了 VITE_API_BASE_URL，则使用该地址；否则使用相对路径（Vercel API）
+  const apiBaseUrl = import.meta.env.VITE_API_BASE_URL || '';
+  const apiUrl = apiBaseUrl ? `${apiBaseUrl}/api/ai` : '/api/ai';
   
   try {
     const response = await fetch(apiUrl, {

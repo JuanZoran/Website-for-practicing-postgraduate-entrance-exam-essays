@@ -105,12 +105,24 @@ export const callAI = async (prompt, jsonMode = false, provider = null) => {
   // 支持通过环境变量配置 Cloudflare Worker API 地址
   // 如果设置了 VITE_API_BASE_URL，则使用该地址（Cloudflare Worker）；否则使用相对路径（Vercel API）
   const apiBaseUrl = import.meta.env.VITE_API_BASE_URL || '';
+  
+  // 临时 fallback：如果环境变量未设置，使用硬编码的 Cloudflare Worker 地址
+  // TODO: 部署后应该通过环境变量配置，这里作为临时方案
+  const fallbackWorkerUrl = 'https://ai-api.huangzirui030927.workers.dev';
+  const finalApiBaseUrl = apiBaseUrl || fallbackWorkerUrl;
+  
   // Cloudflare Worker 直接处理根路径，不需要 /api/ai
   // Vercel API 需要 /api/ai 路径
-  const apiUrl = apiBaseUrl ? apiBaseUrl : '/api/ai';
+  const apiUrl = finalApiBaseUrl;
   
   // 调试信息
-  console.log('[AI Service] API URL:', apiUrl, 'Base URL:', apiBaseUrl || '(not set)');
+  console.log('[AI Service] Environment:', {
+    'VITE_API_BASE_URL (env)': import.meta.env.VITE_API_BASE_URL || '(not set)',
+    'apiBaseUrl (parsed)': apiBaseUrl || '(empty)',
+    'fallbackWorkerUrl': fallbackWorkerUrl,
+    'finalApiBaseUrl': finalApiBaseUrl,
+    'apiUrl (final)': apiUrl
+  });
   
   try {
     const response = await fetch(apiUrl, {

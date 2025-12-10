@@ -109,6 +109,9 @@ export const callAI = async (prompt, jsonMode = false, provider = null) => {
   // Vercel API 需要 /api/ai 路径
   const apiUrl = apiBaseUrl ? apiBaseUrl : '/api/ai';
   
+  // 调试信息
+  console.log('[AI Service] API URL:', apiUrl, 'Base URL:', apiBaseUrl || '(not set)');
+  
   try {
     const response = await fetch(apiUrl, {
       method: 'POST',

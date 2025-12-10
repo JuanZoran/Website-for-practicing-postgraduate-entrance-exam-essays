@@ -4,7 +4,7 @@
  */
 
 const STORAGE_KEY = 'kaoyan_ai_provider';
-const DEFAULT_PROVIDER = 'gemini';
+const DEFAULT_PROVIDER = 'deepseek';
 
 /**
  * 获取所有可用的提供商列表
@@ -75,7 +75,7 @@ export const getCurrentModel = () => {
   }
   const providers = getProviders();
   const defaultProvider = providers.find(p => p.id === DEFAULT_PROVIDER);
-  return defaultProvider?.defaultModel || 'gemini-2.5-flash-preview-09-2025';
+  return defaultProvider?.defaultModel || 'deepseek-chat';
 };
 
 /**

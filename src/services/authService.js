@@ -134,6 +134,12 @@ export const registerWithUsername = async (auth, db, username, password) => {
       errorMessage = "密码强度不够";
     } else if (error.code === "auth/network-request-failed") {
       errorMessage = "网络错误，请检查连接";
+    } else if (error.code === "permission-denied" || error.code?.includes("permission")) {
+      errorMessage = "权限错误，请检查Firestore安全规则配置";
+    } else if (error.message?.includes("permission") || error.message?.includes("Permission")) {
+      errorMessage = "权限错误，请检查Firestore安全规则配置";
+    } else if (error.code === "firestore/permission-denied") {
+      errorMessage = "Firestore权限错误，请检查安全规则";
     }
     
     return { success: false, error: errorMessage };
@@ -188,6 +194,10 @@ export const loginWithUsername = async (auth, db, username, password) => {
       errorMessage = "网络错误，请检查连接";
     } else if (error.code === "auth/too-many-requests") {
       errorMessage = "请求过于频繁，请稍后再试";
+    } else if (error.code === "permission-denied" || error.code?.includes("permission")) {
+      errorMessage = "权限错误，请检查Firestore安全规则配置";
+    } else if (error.message?.includes("permission") || error.message?.includes("Permission")) {
+      errorMessage = "权限错误，请检查Firestore安全规则配置";
     }
     
     return { success: false, error: errorMessage };

@@ -7,6 +7,7 @@
 
 import { recordUsage, checkLimits, estimateTokens } from './usageService';
 import { buildPrompt } from './promptService';
+import { logError, getErrorDetails, parseErrorType, ERROR_TYPES } from './errorService';
 
 const STORAGE_KEY = 'kaoyan_ai_provider';
 const API_KEY_STORAGE_KEY = 'kaoyan_deepseek_api_key'; // 旧格式，保持向后兼容
@@ -626,8 +627,26 @@ export const callAIStream = async (prompt, options = {}) => {
       console.log('[AI Service] Stream aborted');
       return '';
     }
-    console.error('[AI Service] Stream error:', error);
-    onError(error.message);
+    
+    // 使用增强的错误处理
+    const errorDetails = getErrorDetails(error);
+    logError(error, { type: 'stream', contextId, useHistory });
+    
+    console.error('[AI Service] Stream error:', {
+      type: errorDetails.type,
+      title: errorDetails.title,
+      message: error.message
+    });
+    
+    // 传递更详细的错误信息
+    onError({
+      message: errorDetails.suggestions[0],
+      title: errorDetails.title,
+      type: errorDetails.type,
+      retryable: errorDetails.retryable,
+      suggestions: errorDetails.suggestions,
+      action: errorDetails.action
+    });
     throw error;
   }
 };
@@ -843,43 +862,39 @@ export const callAI = async (prompt, jsonMode = false, provider = null) => {
     console.log('[AI Service] Success, result length:', result.length);
     return result;
   } catch (error) {
-    console.error(`[AI Service] Error (${currentProvider}):`, {
-      name: error.name,
-      message: error.message,
-      stack: error.stack
-    });
+    // 使用增强的错误处理服务
+    const errorType = parseErrorType(error);
+    const errorDetails = getErrorDetails(error);
     
-    // 根据jsonMode返回相应格式的错误消息
-    let errorMessage = '';
-    
-    if (error.name === 'AbortError' || error.message.includes('timeout')) {
-      errorMessage = "请求超时，请稍后重试";
-    } else if (error.message.includes('Failed to fetch') || error.message.includes('NetworkError') || error.message.includes('CORS')) {
-      errorMessage = `网络错误: ${error.message}。可能是 CORS 问题，请检查 API 配置或使用代理服务器`;
-    } else if (error.message.includes('401') || error.message.includes('403')) {
-      errorMessage = "API密钥无效，请检查配置";
-    } else if (error.message.includes('429')) {
-      errorMessage = "请求过于频繁，请稍后再试";
-    } else {
-      errorMessage = `错误: ${error.message}`;
-    }
-    
-    // 添加更详细的错误日志
-    console.error(`[AI Service] Full error details:`, {
-      name: error.name,
-      message: error.message,
-      stack: error.stack,
+    // 记录错误日志
+    logError(error, {
       provider: currentProvider,
       model: currentModel,
-      url: API_URL
+      url: API_URL,
+      jsonMode
     });
     
-    // 如果jsonMode为true，返回JSON格式的错误消息
+    console.error(`[AI Service] Error (${currentProvider}):`, {
+      type: errorType,
+      title: errorDetails.title,
+      message: error.message,
+      suggestions: errorDetails.suggestions
+    });
+    
+    // 构建用户友好的错误消息
+    const errorMessage = errorDetails.suggestions[0];
+    
+    // 如果jsonMode为true，返回JSON格式的错误消息（包含更多信息）
     if (jsonMode) {
       return JSON.stringify({
         error: errorMessage,
+        errorType: errorType,
         status: 'error',
-        message: errorMessage
+        message: errorMessage,
+        title: errorDetails.title,
+        suggestions: errorDetails.suggestions,
+        retryable: errorDetails.retryable,
+        action: errorDetails.action || null
       });
     }
     

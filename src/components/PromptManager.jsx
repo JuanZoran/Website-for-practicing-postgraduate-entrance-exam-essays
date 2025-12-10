@@ -1,7 +1,6 @@
 import { useState, useEffect } from 'react';
-import { X, FileText, Plus, Trash2, Check, Edit2, Copy, Download, Upload, ChevronDown, ChevronUp, Sparkles, BookOpen } from 'lucide-react';
+import { X, FileText, Plus, Trash2, Check, Edit2, Copy, Download, Upload, ChevronDown, ChevronUp, BookOpen } from 'lucide-react';
 import {
-  getAllTemplates,
   getTemplatesByType,
   getActiveTemplates,
   setActiveTemplate,
@@ -20,7 +19,6 @@ const PromptManager = ({ isOpen, onClose }) => {
   const [activeTemplates, setActiveTemplatesState] = useState({});
   const [editingTemplate, setEditingTemplate] = useState(null);
   const [expandedTemplate, setExpandedTemplate] = useState(null);
-  const [showCriteria, setShowCriteria] = useState(false);
 
   useEffect(() => {
     if (isOpen) {

@@ -90,6 +90,8 @@ export default defineConfig({
     outDir: 'dist'
   },
   server: {
+    host: '0.0.0.0', // 允许外部访问（局域网）
+    port: 5173,
     proxy: {
       '/api': {
         target: 'http://localhost:3000',

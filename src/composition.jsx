@@ -1,6 +1,10 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { BookOpen, CheckCircle, XCircle, RefreshCw, ChevronRight, PenTool, Layout, List, HelpCircle, Sparkles, Loader, MessageSquare, Image as ImageIcon, Link as LinkIcon, Table as TableIcon, BrainCircuit, X, Bookmark, AlertTriangle, Trash2, Save, ChevronDown, ChevronUp, Quote, ArrowRight, Check, Upload, Cloud, Moon, Sun, Download, FileJson, PlusCircle, Lightbulb, Clock, History, Copy, LogIn, Wifi, WifiOff, User, Settings, LogOut } from 'lucide-react';
-import { callAI } from "./services/aiService";
+import { BookOpen, CheckCircle, XCircle, RefreshCw, ChevronRight, PenTool, Layout, List, HelpCircle, Sparkles, Loader, MessageSquare, Image as ImageIcon, Link as LinkIcon, Table as TableIcon, BrainCircuit, X, Bookmark, AlertTriangle, Trash2, Save, ChevronDown, ChevronUp, Quote, ArrowRight, Check, Upload, Cloud, Moon, Sun, Download, FileJson, PlusCircle, Lightbulb, Clock, History, Copy, LogIn, Wifi, WifiOff, User, Settings, LogOut, Edit, RotateCcw } from 'lucide-react';
+import Ripples from 'react-ripples';
+import { callAI, clearConversationHistory } from "./services/aiService";
+import { buildPrompt } from "./services/promptService";
+import { FollowUpChat } from "./components/FollowUpChat";
+import { GrammarScoreDisplay, FinalScoreDisplay, LogicStatusDisplay } from "./components/ScoreDisplay";
 import AISettings from "./components/AISettings";
 import AuthModal from "./components/AuthModal";
 import { 
@@ -37,25 +41,246 @@ try {
 // --- UTILS ---
 const SimpleMarkdown = ({ text, className = "" }) => {
   if (!text) return null;
+  
+  // 格式化内联文本，支持更丰富的颜色
+  const formatInline = (str) => {
+    const elements = [];
+    let lastIndex = 0;
+    const matches = [];
+    
+    // 匹配粗体 **text**
+    const boldRegex = /\*\*(.+?)\*\*/g;
+    let match;
+    while ((match = boldRegex.exec(str)) !== null) {
+      matches.push({ start: match.index, end: match.index + match[0].length, content: match[1], type: 'bold' });
+    }
+    
+    // 匹配引号内容 "text"
+    const quoteRegex = /"([^"]+)"/g;
+    while ((match = quoteRegex.exec(str)) !== null) {
+      const overlaps = matches.some(m => 
+        (match.index >= m.start && match.index < m.end) || 
+        (match.index + match[0].length > m.start && match.index + match[0].length <= m.end)
+      );
+      if (!overlaps) {
+        matches.push({ start: match.index, end: match.index + match[0].length, content: match[1], type: 'quote' });
+      }
+    }
+    
+    // 匹配英文单词/短语（用于高亮关键术语）
+    const termRegex = /\b([A-Z][a-z]+(?:\s+[A-Z][a-z]+)*)\b/g;
+    while ((match = termRegex.exec(str)) !== null) {
+      const overlaps = matches.some(m => 
+        (match.index >= m.start && match.index < m.end) || 
+        (match.index + match[0].length > m.start && match.index + match[0].length <= m.end)
+      );
+      if (!overlaps && match[1].length > 3) {
+        matches.push({ start: match.index, end: match.index + match[0].length, content: match[1], type: 'term' });
+      }
+    }
+    
+    // 按位置排序
+    matches.sort((a, b) => a.start - b.start);
+    
+    // 构建结果
+    matches.forEach((m, idx) => {
+      if (m.start > lastIndex) {
+        elements.push(<span key={`t${idx}`}>{str.slice(lastIndex, m.start)}</span>);
+      }
+      if (m.type === 'bold') {
+        elements.push(
+          <strong key={`b${idx}`} className="font-bold text-indigo-700 dark:text-indigo-300 bg-indigo-50 dark:bg-indigo-900/40 px-1 rounded">
+            {m.content}
+          </strong>
+        );
+      } else if (m.type === 'quote') {
+        elements.push(
+          <span key={`q${idx}`} className="text-emerald-600 dark:text-emerald-400 font-medium">"{m.content}"</span>
+        );
+      } else if (m.type === 'term') {
+        elements.push(
+          <span key={`e${idx}`} className="text-blue-600 dark:text-blue-400 font-medium">{m.content}</span>
+        );
+      }
+      lastIndex = m.end;
+    });
+    
+    if (lastIndex < str.length) {
+      elements.push(<span key="last">{str.slice(lastIndex)}</span>);
+    }
+    
+    return elements.length > 0 ? elements : str;
+  };
+  
   return (
-    <div className={`space-y-1 ${className}`}>
+    <div className={`space-y-2 ${className}`}>
       {text.split('\n').map((line, i) => {
-        if (!line.trim()) return <div key={i} className="h-1"></div>;
-        const isBullet = line.trim().startsWith('- ') || line.trim().startsWith('* ');
-        const cleanLine = isBullet ? line.trim().substring(2) : line;
-        const parts = cleanLine.split(/(\*\*.*?\*\*)/g).map((part, j) => {
-          if (part.startsWith('**') && part.endsWith('**')) {
-            return <strong key={j} className="font-bold text-indigo-700 dark:text-indigo-300 bg-indigo-50 dark:bg-indigo-900/50 px-0.5 rounded">{part.slice(2, -2)}</strong>;
-          }
-          return part;
-        });
+        if (!line.trim()) return <div key={i} className="h-2"></div>;
+        
+        // 检测列表项
+        const isBullet = /^[-*•]\s/.test(line.trim());
+        const isNumbered = /^\d+[.)]\s/.test(line.trim());
+        const cleanLine = isBullet ? line.trim().substring(2) : 
+                         isNumbered ? line.trim().replace(/^\d+[.)]\s/, '') : line;
+        
+        const formattedContent = formatInline(cleanLine);
+        
+        if (isBullet) {
+          return (
+            <div key={i} className="flex gap-2 ml-1 leading-relaxed break-words">
+              <span className="text-indigo-400 dark:text-indigo-500 mt-0.5 flex-shrink-0">•</span>
+              <div className="flex-1">{formattedContent}</div>
+            </div>
+          );
+        }
+        
+        if (isNumbered) {
+          const num = line.trim().match(/^\d+/)[0];
+          return (
+            <div key={i} className="flex gap-2 ml-1 leading-relaxed break-words">
+              <span className="text-emerald-500 dark:text-emerald-400 font-medium text-sm mt-0.5 flex-shrink-0 min-w-[1.5rem]">{num}.</span>
+              <div className="flex-1">{formattedContent}</div>
+            </div>
+          );
+        }
+        
         return (
-          <div key={i} className={`${isBullet ? 'flex gap-2 ml-1' : ''} leading-relaxed break-words`}>
-            {isBullet && <span className="text-indigo-400 mt-1.5 flex-shrink-0">•</span>}
-            <div className={`${isBullet ? '' : ''}`}>{parts}</div>
-          </div>
+          <div key={i} className="leading-relaxed break-words">{formattedContent}</div>
         );
       })}
+    </div>
+  );
+};
+
+// --- EdgeSwipeDetector Component ---
+const EdgeSwipeDetector = ({ onSwipeRight, enabled = true }) => {
+  const touchStartX = useRef(null);
+  const edgeThreshold = 20; // 从右边缘20px内开始滑动
+
+  useEffect(() => {
+    if (!enabled) return;
+
+    const handleTouchStart = (e) => {
+      const touchX = e.touches[0].clientX;
+      const screenWidth = window.innerWidth;
+      // 检测是否从右边缘开始
+      if (screenWidth - touchX <= edgeThreshold) {
+        touchStartX.current = touchX;
+      }
+    };
+
+    const handleTouchMove = (e) => {
+      if (touchStartX.current === null) return;
+      const touchX = e.touches[0].clientX;
+      const deltaX = touchX - touchStartX.current;
+      
+      // 向左滑动超过50px，触发打开侧边栏
+      if (deltaX < -50) {
+        onSwipeRight();
+        touchStartX.current = null;
+      }
+    };
+
+    const handleTouchEnd = () => {
+      touchStartX.current = null;
+    };
+
+    document.addEventListener('touchstart', handleTouchStart, { passive: true });
+    document.addEventListener('touchmove', handleTouchMove, { passive: true });
+    document.addEventListener('touchend', handleTouchEnd, { passive: true });
+
+    return () => {
+      document.removeEventListener('touchstart', handleTouchStart);
+      document.removeEventListener('touchmove', handleTouchMove);
+      document.removeEventListener('touchend', handleTouchEnd);
+    };
+  }, [enabled, onSwipeRight]);
+
+  return null;
+};
+
+// --- SwipeableTopicCards Component (Jobs Style) ---
+const SwipeableTopicCards = ({ list, currentIdx, onSelect, onGenerate }) => {
+  const [touchStart, setTouchStart] = useState(null);
+  const [touchEnd, setTouchEnd] = useState(null);
+  const containerRef = useRef(null);
+  const minSwipeDistance = 50;
+
+  const onTouchStart = (e) => {
+    setTouchEnd(null);
+    setTouchStart(e.targetTouches[0].clientX);
+  };
+
+  const onTouchMove = (e) => setTouchEnd(e.targetTouches[0].clientX);
+
+  const onTouchEnd = () => {
+    if (!touchStart || !touchEnd) return;
+    const distance = touchStart - touchEnd;
+    if (distance > minSwipeDistance && currentIdx < list.length - 1) onSelect(currentIdx + 1);
+    if (distance < -minSwipeDistance && currentIdx > 0) onSelect(currentIdx - 1);
+  };
+
+  return (
+    <div className="relative">
+      {/* 当前题目卡片 - 大卡片设计 */}
+      <div 
+        ref={containerRef}
+        className="relative overflow-hidden"
+        onTouchStart={onTouchStart}
+        onTouchMove={onTouchMove}
+        onTouchEnd={onTouchEnd}
+      >
+        <div 
+          className="flex transition-transform duration-500 ease-out"
+          style={{ transform: `translateX(-${currentIdx * 100}%)` }}
+        >
+          {list.map((item, i) => (
+            <div key={i} className="w-full flex-shrink-0 px-1">
+              <div
+                className={`p-6 rounded-3xl transition-all duration-300 ${
+                  currentIdx === i
+                    ? 'bg-indigo-600 text-white shadow-xl shadow-indigo-200 dark:shadow-indigo-900/50'
+                    : 'bg-white dark:bg-slate-800 text-slate-600 dark:text-slate-400'
+                }`}
+              >
+                <span className={`text-sm ${currentIdx === i ? 'text-indigo-200' : 'text-slate-400'}`}>
+                  {item.year}
+                </span>
+                <h3 className={`text-xl font-semibold mt-1 ${currentIdx === i ? 'text-white' : 'text-slate-800 dark:text-slate-200'}`}>
+                  {item.title}
+                </h3>
+                <p className={`text-sm mt-2 line-clamp-2 ${currentIdx === i ? 'text-indigo-100' : 'text-slate-500'}`}>
+                  {item.description}
+                </p>
+              </div>
+            </div>
+          ))}
+        </div>
+      </div>
+      
+      {/* 极简指示器 */}
+      <div className="flex justify-center gap-2 mt-6">
+        {list.map((_, i) => (
+          <button
+            key={i}
+            onClick={() => onSelect(i)}
+            className={`rounded-full transition-all duration-500 ${
+              i === currentIdx 
+                ? 'w-8 h-2 bg-indigo-600' 
+                : 'w-2 h-2 bg-slate-300 dark:bg-slate-600 hover:bg-slate-400'
+            }`}
+          />
+        ))}
+      </div>
+      
+      {/* AI出题 - 更优雅的设计 */}
+      <button 
+        onClick={onGenerate}
+        className="w-full mt-6 p-4 rounded-2xl bg-gradient-to-r from-amber-50 to-orange-50 dark:from-amber-900/20 dark:to-orange-900/20 text-amber-700 dark:text-amber-400 flex items-center justify-center gap-3 font-medium active:scale-[0.98] transition-transform"
+      >
+        <Sparkles className="w-5 h-5" />
+        <span>AI 智能出题</span>
+      </button>
     </div>
   );
 };
@@ -174,34 +399,34 @@ const INITIAL_EXAM_DATA = [
     templateString: "Unfolding before us is a cartoon about habits. Specifically, {{desc}}. The purpose is to illustrate the impact of bad habits. First and foremost, {{harm}}. Accordingly, we should {{action}}."
   },
   {
-    id: "2021", year: "2021", title: "自信", mode: "Mode A", visualType: "image", description: "一个演讲者站在台上，台下有很多观众，他自信地演讲。",
+    id: "2021", year: "2021", title: "兴趣", mode: "Mode A", visualType: "image", description: "一个孩子穿着戏曲服装，对父亲说很多同学觉得学唱戏不好玩，父亲鼓励他说只要自己喜欢就足够了。",
     defaultImage: "/images/exam/2021.png",
     slots: [
-      { id: "desc", label: "图画描述", question: "描述演讲者的自信表现。", templateContext: "Specifically, [INSERT HERE].", placeholder: "例如：演讲者自信地站在台上，面对观众..." },
-      { id: "arg1", label: "核心意义", question: "为什么自信很重要？", templateContext: "First and foremost, [INSERT HERE].", placeholder: "例如：自信是成功的基础，帮助克服困难..." },
-      { id: "action", label: "建议", question: "如何培养自信？", templateContext: "Accordingly, [INSERT HERE].", placeholder: "例如：充分准备，积极实践，建立自信..." }
+      { id: "desc", label: "图画描述", question: "描述父子关于学戏曲的对话。", templateContext: "Specifically, [INSERT HERE].", placeholder: "例如：孩子担心同学觉得学唱戏不好玩，父亲鼓励他坚持自己的兴趣..." },
+      { id: "arg1", label: "核心意义", question: "为什么坚持自己的兴趣很重要？", templateContext: "First and foremost, [INSERT HERE].", placeholder: "例如：兴趣是最好的老师，坚持自己的选择才能获得真正的快乐..." },
+      { id: "action", label: "建议", question: "如何对待自己的兴趣？", templateContext: "Accordingly, [INSERT HERE].", placeholder: "例如：不要被他人意见左右，坚持自己的热爱..." }
     ],
-    templateString: "Unfolding before us is a cartoon about confidence. Specifically, {{desc}}. The purpose is to illustrate the importance of self-confidence. First and foremost, {{arg1}}. Accordingly, we should {{action}}."
+    templateString: "Unfolding before us is a thought-provoking cartoon. Specifically, {{desc}}. The purpose is to illustrate the importance of following one's own interests. First and foremost, {{arg1}}. Accordingly, we should {{action}}."
   },
   {
-    id: "2022", year: "2022", title: "传统文化", mode: "Mode A", visualType: "image", description: "一个年轻人穿着传统服装，使用现代科技展示传统文化。",
+    id: "2022", year: "2022", title: "跨学科学习", mode: "Mode A", visualType: "image", description: "两个学生站在公告栏前，一个说不是我们专业的听了也没多大用，另一个说听听总会有好处。",
     defaultImage: "/images/exam/2022.png",
     slots: [
-      { id: "desc", label: "图画描述", question: "描述传统与现代的结合。", templateContext: "Specifically, [INSERT HERE].", placeholder: "例如：年轻人用现代方式传承传统文化..." },
-      { id: "arg1", label: "核心意义", question: "为什么需要传承传统文化？", templateContext: "First and foremost, [INSERT HERE].", placeholder: "例如：传统文化是民族的根，需要传承和创新..." },
-      { id: "action", label: "建议", question: "如何传承传统文化？", templateContext: "Accordingly, [INSERT HERE].", placeholder: "例如：用现代方式传播，让传统文化焕发新活力..." }
+      { id: "desc", label: "图画描述", question: "描述两个学生对听讲座的不同态度。", templateContext: "Specifically, [INSERT HERE].", placeholder: "例如：一个学生认为非专业的讲座没用，另一个认为听听总会有好处..." },
+      { id: "arg1", label: "核心意义", question: "为什么跨学科学习很重要？", templateContext: "First and foremost, [INSERT HERE].", placeholder: "例如：跨学科学习能拓宽视野，促进创新思维..." },
+      { id: "action", label: "建议", question: "如何培养跨学科学习的意识？", templateContext: "Accordingly, [INSERT HERE].", placeholder: "例如：保持开放心态，积极参与各类讲座和活动..." }
     ],
-    templateString: "Unfolding before us is a cartoon about traditional culture. Specifically, {{desc}}. The purpose is to illustrate the importance of cultural inheritance. First and foremost, {{arg1}}. Accordingly, we should {{action}}."
+    templateString: "Unfolding before us is a thought-provoking cartoon. Specifically, {{desc}}. The purpose is to illustrate the importance of interdisciplinary learning. First and foremost, {{arg1}}. Accordingly, we should {{action}}."
   },
   {
-    id: "2023", year: "2023", title: "健康", mode: "Mode A", visualType: "image", description: "一个年轻人一边吃垃圾食品，一边运动，形成对比。",
+    id: "2023", year: "2023", title: "传统文化复兴", mode: "Mode A", visualType: "image", description: "一位老人看着村里的龙舟比赛，感叹比赛越来越热闹了，很多人前来观看和参与。",
     defaultImage: "/images/exam/2023.png",
     slots: [
-      { id: "desc", label: "图画描述", question: "描述图画中的矛盾。", templateContext: "Specifically, [INSERT HERE].", placeholder: "例如：一边吃垃圾食品，一边运动..." },
-      { id: "harm", label: "问题分析", question: "这种生活方式有什么问题？", templateContext: "First and foremost, [INSERT HERE].", placeholder: "例如：不健康的饮食抵消了运动的效果..." },
-      { id: "action", label: "建议", question: "如何保持健康？", templateContext: "Accordingly, [INSERT HERE].", placeholder: "例如：均衡饮食，坚持运动，养成健康习惯..." }
+      { id: "desc", label: "图画描述", question: "描述龙舟比赛的热闹场景。", templateContext: "Specifically, [INSERT HERE].", placeholder: "例如：村里的龙舟比赛越来越热闹，吸引了很多人前来观看..." },
+      { id: "arg1", label: "核心意义", question: "为什么传统文化活动的复兴很重要？", templateContext: "First and foremost, [INSERT HERE].", placeholder: "例如：传统文化是民族精神的载体，复兴有助于增强文化自信..." },
+      { id: "action", label: "建议", question: "如何促进传统文化的传承与发展？", templateContext: "Accordingly, [INSERT HERE].", placeholder: "例如：积极参与传统活动，让传统文化在现代社会焕发新活力..." }
     ],
-    templateString: "Unfolding before us is a cartoon about health. Specifically, {{desc}}. The purpose is to illustrate the importance of a healthy lifestyle. First and foremost, {{harm}}. Accordingly, we should {{action}}."
+    templateString: "Unfolding before us is a thought-provoking cartoon. Specifically, {{desc}}. The purpose is to illustrate the revitalization of traditional culture. First and foremost, {{arg1}}. Accordingly, we should {{action}}."
   },
   {
     id: "2024", year: "2024", title: "创新", mode: "Mode A", visualType: "image", description: "一个创新者站在传统和创新的交界处，思考如何平衡。",
@@ -273,31 +498,63 @@ const STATIC_VOCAB_LISTS = [
 
 // --- COMPONENTS ---
 
-// --- History Drawer ---
+// --- History Drawer (Jobs Style) ---
 const HistoryDrawer = ({ isOpen, onClose, history, topicTitle }) => {
   if (!isOpen) return null;
   return (
-    <div className={`fixed inset-y-0 right-0 w-80 sm:w-96 bg-white dark:bg-slate-900 border-l border-slate-200 dark:border-slate-700 transform transition-transform duration-300 ease-in-out z-40 ${isOpen ? 'translate-x-0' : 'translate-x-full'} flex flex-col shadow-2xl`}>
-      <div className="p-4 bg-slate-50 dark:bg-slate-800 border-b border-slate-200 dark:border-slate-700 flex justify-between items-center">
-        <h3 className="font-bold text-lg text-slate-800 dark:text-slate-100 flex items-center gap-2"><History className="w-5 h-5 text-indigo-600" /> 历史回溯</h3>
-        <button onClick={onClose} className="text-slate-400 hover:text-slate-600 p-1"><X className="w-6 h-6" /></button>
-      </div>
-      <div className="p-3 bg-indigo-50 dark:bg-indigo-900/20 text-xs text-indigo-800 dark:text-indigo-200 font-medium">当前题目: {topicTitle}</div>
-      <div className="flex-1 overflow-y-auto p-4 space-y-4">
-        {!history || history.length === 0 ? <div className="text-center py-10 text-slate-400 text-sm"><Clock className="w-8 h-8 mx-auto mb-2 opacity-30" /><p>暂无历史</p></div> : 
-          history.slice().reverse().map((item, idx) => (
-            <div key={idx} className="bg-white dark:bg-slate-800 p-3 rounded-lg border border-slate-200 dark:border-slate-700 shadow-sm">
-              <div className="flex justify-between items-center mb-2 pb-2 border-b border-slate-100 dark:border-slate-700">
-                <span className={`text-xs font-bold px-2 py-0.5 rounded ${item.type==='logic'?'bg-blue-100 text-blue-700':item.type==='grammar'?'bg-purple-100 text-purple-700':'bg-green-100 text-green-700'}`}>{item.type}</span>
-                <span className="text-[10px] text-slate-400">{new Date(item.timestamp).toLocaleString()}</span>
-              </div>
-              <div className="text-sm text-slate-700 dark:text-slate-300 mb-2 font-mono bg-slate-50 dark:bg-slate-900 p-2 rounded truncate">"{item.input.substring(0,50)}..."</div>
-              {item.feedback && <div className="text-xs text-slate-500 dark:text-slate-400"><span className="font-bold">AI:</span> {item.feedback.comment?.substring(0,40)}...</div>}
+    <>
+      <div className="fixed inset-0 bg-black/40 z-40 animate-fadeIn" onClick={onClose} />
+      <div className={`fixed inset-y-0 right-0 w-full sm:w-96 bg-white dark:bg-slate-900 transform transition-transform duration-300 ease-out z-40 ${isOpen ? 'translate-x-0' : 'translate-x-full'} flex flex-col`}>
+        {/* 头部 */}
+        <div className="px-6 py-4 glass border-b border-slate-200/50 dark:border-slate-700/50 flex justify-between items-center">
+          <h3 className="font-semibold text-[17px] text-slate-800 dark:text-slate-100">练习历史</h3>
+          <button onClick={onClose} className="touch-target text-indigo-600 font-medium active:scale-95 transition-transform">
+            完成
+          </button>
+        </div>
+        
+        {/* 当前题目 */}
+        <div className="px-6 py-3 border-b border-slate-100 dark:border-slate-800">
+          <span className="text-[13px] text-slate-400">当前题目</span>
+          <p className="text-[15px] text-slate-700 dark:text-slate-200 font-medium">{topicTitle}</p>
+        </div>
+        
+        {/* 历史列表 */}
+        <div className="flex-1 overflow-y-auto px-6 py-4 space-y-4">
+          {!history || history.length === 0 ? (
+            <div className="text-center py-16">
+              <Clock className="w-12 h-12 mx-auto mb-4 text-slate-200 dark:text-slate-700" />
+              <p className="text-[15px] text-slate-400">暂无练习记录</p>
             </div>
-          ))
-        }
+          ) : (
+            history.slice().reverse().map((item, idx) => (
+              <div key={idx} className="p-4 rounded-2xl bg-slate-50 dark:bg-slate-800">
+                <div className="flex justify-between items-center mb-3">
+                  <span className={`text-[13px] font-medium px-3 py-1 rounded-full ${
+                    item.type === 'logic' ? 'bg-blue-100 text-blue-700 dark:bg-blue-900/50 dark:text-blue-300' :
+                    item.type === 'grammar' ? 'bg-purple-100 text-purple-700 dark:bg-purple-900/50 dark:text-purple-300' :
+                    'bg-green-100 text-green-700 dark:bg-green-900/50 dark:text-green-300'
+                  }`}>
+                    {item.type === 'logic' ? '审题' : item.type === 'grammar' ? '润色' : '阅卷'}
+                  </span>
+                  <span className="text-[12px] text-slate-400">
+                    {new Date(item.timestamp).toLocaleDateString()}
+                  </span>
+                </div>
+                <p className="text-[15px] text-slate-600 dark:text-slate-300 line-clamp-2 mb-2">
+                  {item.input}
+                </p>
+                {item.feedback?.comment && (
+                  <p className="text-[13px] text-slate-400 line-clamp-1">
+                    AI: {item.feedback.comment}
+                  </p>
+                )}
+              </div>
+            ))
+          )}
+        </div>
       </div>
-    </div>
+    </>
   );
 };
 
@@ -307,6 +564,9 @@ const VocabSidebar = ({ isOpen, toggle, currentTopic, savedVocab, savedErrors, o
   const [aiVocabList, setAiVocabList] = useState([]);
   const [loading, setLoading] = useState(false);
   const fileInputRef = useRef(null);
+  const sidebarRef = useRef(null);
+  const touchStartX = useRef(null);
+  const touchStartY = useRef(null);
 
   const toggleVocabExpand = (idx) => setExpandedVocabIndex(expandedVocabIndex === idx ? null : idx);
 
@@ -314,11 +574,32 @@ const VocabSidebar = ({ isOpen, toggle, currentTopic, savedVocab, savedErrors, o
     setLoading(true);
     const prompt = `Task: Generate 3 advanced English vocabulary items for essay topic: "${currentTopic}". Target: High-scoring nouns/verbs/idioms. Output JSON array: [{ "word": "Resilience", "meaning": "韧性 (n.)", "collocation": "demonstrate resilience", "example": "Optimism helps us demonstrate resilience.", "scenario": "Thinking: Use when arguing difficulties make us stronger." }]`;
     try {
+      console.log('[Composition] Starting AI request for vocab expansion...');
       const res = await callAI(prompt, true);
-      const json = JSON.parse(res.replace(/```json|```/g, '').trim());
-      if (Array.isArray(json)) setAiVocabList(json);
-    } catch (e) { console.error(e); }
-    setLoading(false);
+      console.log('[Composition] AI response received, length:', res?.length);
+      if (!res) {
+        throw new Error('AI 返回空响应，请检查 API 配置');
+      }
+      // 处理可能的 JSON 包装
+      let jsonStr = res.replace(/```json|```/g, '').trim();
+      // 如果响应本身是 JSON 字符串（错误响应）
+      if (jsonStr.startsWith('{') && jsonStr.includes('"error"')) {
+        const errorObj = JSON.parse(jsonStr);
+        throw new Error(errorObj.error || errorObj.message || 'AI 返回错误');
+      }
+      const json = JSON.parse(jsonStr);
+      if (Array.isArray(json)) {
+        setAiVocabList(json);
+        console.log('[Composition] Successfully parsed vocab list, count:', json.length);
+      } else {
+        throw new Error('AI 返回格式不正确，期望数组格式');
+      }
+    } catch (e) {
+      console.error('[Composition] Error in handleExpandVocab:', e);
+      alert(`生成推荐失败: ${e.message || '未知错误，请查看控制台'}`);
+    } finally {
+      setLoading(false);
+    }
   };
 
   const handleFileChange = (e) => {
@@ -330,21 +611,90 @@ const VocabSidebar = ({ isOpen, toggle, currentTopic, savedVocab, savedErrors, o
     }
   };
 
+  // 侧边栏滑动手势处理
+  const handleTouchStart = (e) => {
+    touchStartX.current = e.touches[0].clientX;
+    touchStartY.current = e.touches[0].clientY;
+  };
+
+  const handleTouchMove = (e) => {
+    if (!touchStartX.current || !touchStartY.current) return;
+    const touchX = e.touches[0].clientX;
+    const touchY = e.touches[0].clientY;
+    const deltaX = touchX - touchStartX.current;
+    const deltaY = touchY - touchStartY.current;
+    
+    // 只处理水平滑动，且水平滑动距离大于垂直滑动距离
+    if (Math.abs(deltaX) > Math.abs(deltaY) && deltaX < -50) {
+      // 向左滑动超过50px，关闭侧边栏
+      toggle();
+      touchStartX.current = null;
+      touchStartY.current = null;
+    }
+  };
+
+  const handleTouchEnd = () => {
+    touchStartX.current = null;
+    touchStartY.current = null;
+  };
+
   return (
-    <div className={`fixed inset-y-0 right-0 w-80 sm:w-96 bg-slate-50 dark:bg-slate-900 border-l border-slate-200 dark:border-slate-700 transform transition-transform duration-300 ease-in-out z-30 ${isOpen ? 'translate-x-0' : 'translate-x-full'} flex flex-col shadow-2xl`}>
-      <div className="p-4 bg-white dark:bg-slate-800 border-b border-slate-200 dark:border-slate-700 flex justify-between items-center flex-shrink-0">
-        <h3 className="font-bold text-lg text-slate-800 dark:text-slate-100 flex items-center gap-2"><BookOpen className="w-5 h-5 text-indigo-600 dark:text-indigo-400" /> 我的笔记本</h3>
-        <button onClick={toggle} className="text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 p-1 rounded-full"><ChevronRight className="w-6 h-6" /></button>
+    <div 
+      ref={sidebarRef}
+      className={`fixed inset-y-0 right-0 w-full sm:w-96 bg-white dark:bg-slate-900 transform transition-transform duration-300 ease-out z-30 ${isOpen ? 'translate-x-0' : 'translate-x-full'} flex flex-col`}
+      onTouchStart={handleTouchStart}
+      onTouchMove={handleTouchMove}
+      onTouchEnd={handleTouchEnd}
+    >
+      {/* 头部 - 毛玻璃效果 */}
+      <div className="px-6 py-4 glass border-b border-slate-200/50 dark:border-slate-700/50 flex justify-between items-center flex-shrink-0">
+        <h3 className="font-semibold text-[17px] text-slate-800 dark:text-slate-100">笔记本</h3>
+        <button onClick={toggle} className="touch-target text-indigo-600 font-medium active:scale-95 transition-transform">
+          完成
+        </button>
       </div>
 
-      <div className="bg-indigo-50 dark:bg-indigo-900/30 px-4 py-2 flex items-center gap-2 text-xs text-indigo-600 dark:text-indigo-300 border-b border-indigo-100 dark:border-indigo-900/50">
-        {user ? <><Wifi className="w-3 h-3 text-green-500" /><span>云端同步已开启</span></> : <><WifiOff className="w-3 h-3 text-slate-400" /><span>离线模式 (数据仅保存在本地)</span></>}
+      {/* 同步状态 */}
+      <div className="px-6 py-3 flex items-center gap-2 text-[13px] border-b border-slate-100 dark:border-slate-800">
+        {user ? (
+          <><div className="w-2 h-2 bg-green-500 rounded-full" /><span className="text-slate-500">云端同步已开启</span></>
+        ) : (
+          <><div className="w-2 h-2 bg-slate-300 rounded-full" /><span className="text-slate-400">离线模式</span></>
+        )}
       </div>
 
-      <div className="flex border-b border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 flex-shrink-0">
-        <button onClick={() => setActiveTab('system')} className={`flex-1 py-3 text-xs font-bold border-b-2 transition-colors ${activeTab === 'system' ? 'border-indigo-600 text-indigo-700 dark:text-indigo-300 bg-indigo-50 dark:bg-indigo-900/20' : 'border-transparent text-slate-500 dark:text-slate-400'}`}>📚 必背</button>
-        <button onClick={() => setActiveTab('myVocab')} className={`flex-1 py-3 text-xs font-bold border-b-2 transition-colors ${activeTab === 'myVocab' ? 'border-amber-500 text-amber-700 dark:text-amber-400 bg-amber-50 dark:bg-amber-900/20' : 'border-transparent text-slate-500 dark:text-slate-400'}`}>⭐ 生词</button>
-        <button onClick={() => setActiveTab('mistakes')} className={`flex-1 py-3 text-xs font-bold border-b-2 transition-colors ${activeTab === 'mistakes' ? 'border-red-500 text-red-700 dark:text-red-400 bg-red-50 dark:bg-red-900/20' : 'border-transparent text-slate-500 dark:text-slate-400'}`}>🛑 错题</button>
+      {/* 标签页 - 更简洁 */}
+      <div className="flex px-4 py-2 gap-2 flex-shrink-0">
+        <button 
+          onClick={() => setActiveTab('system')} 
+          className={`flex-1 py-3 rounded-2xl text-[13px] font-medium transition-all ${
+            activeTab === 'system' 
+              ? 'bg-indigo-600 text-white' 
+              : 'bg-slate-100 dark:bg-slate-800 text-slate-500'
+          }`}
+        >
+          必背词汇
+        </button>
+        <button 
+          onClick={() => setActiveTab('myVocab')} 
+          className={`flex-1 py-3 rounded-2xl text-[13px] font-medium transition-all ${
+            activeTab === 'myVocab' 
+              ? 'bg-amber-500 text-white' 
+              : 'bg-slate-100 dark:bg-slate-800 text-slate-500'
+          }`}
+        >
+          收藏
+        </button>
+        <button 
+          onClick={() => setActiveTab('mistakes')} 
+          className={`flex-1 py-3 rounded-2xl text-[13px] font-medium transition-all ${
+            activeTab === 'mistakes' 
+              ? 'bg-red-500 text-white' 
+              : 'bg-slate-100 dark:bg-slate-800 text-slate-500'
+          }`}
+        >
+          错题
+        </button>
       </div>
 
       <div className="flex-1 overflow-y-auto p-4 space-y-4">
@@ -356,65 +706,149 @@ const VocabSidebar = ({ isOpen, toggle, currentTopic, savedVocab, savedErrors, o
               <p className="text-xs text-indigo-600 dark:text-indigo-300 mb-3">生成与当前主题相关的高级词汇、场景和例句。</p>
               
               {!aiVocabList.length && !loading && (
-                <button onClick={handleExpandVocab} className="w-full bg-indigo-600 text-white text-xs font-bold py-2 rounded shadow-sm hover:bg-indigo-700 transition-colors flex justify-center items-center gap-2">
-                  <Sparkles className="w-3 h-3" /> 生成推荐
-                </button>
+                <Ripples>
+                  <button onClick={handleExpandVocab} className="w-full bg-indigo-600 text-white text-xs font-bold py-3 rounded shadow-sm hover:bg-indigo-700 transition-colors flex justify-center items-center gap-2 min-h-[44px]">
+                    <Sparkles className="w-3 h-3" /> 生成推荐
+                  </button>
+                </Ripples>
               )}
               {loading && <div className="text-center py-4"><Loader className="w-5 h-5 animate-spin text-indigo-500 mx-auto" /></div>}
               
               <div className="space-y-2">
-                {aiVocabList.map((item, idx) => (
-                  <div key={idx} className="bg-white dark:bg-slate-800 p-3 rounded border border-indigo-100 dark:border-slate-600 shadow-sm relative group">
-                    <div className="font-bold text-slate-800 dark:text-slate-200 text-sm">{item.word}</div>
-                    <div className="text-xs text-slate-500 dark:text-slate-400">{item.meaning}</div>
-                    <div className="text-[10px] text-slate-400 mt-1 italic pr-6 truncate">{item.scenario}</div>
-                    <button 
-                      onClick={() => onAddGeneratedVocab({...item, sourceTopic: currentTopic, timestamp: Date.now()})}
-                      className="absolute top-2 right-2 text-indigo-400 hover:text-indigo-600 dark:hover:text-indigo-300 bg-indigo-50 dark:bg-indigo-900/50 p-1.5 rounded-full"
-                    >
-                      <PlusCircle className="w-4 h-4" />
-                    </button>
-                  </div>
-                ))}
-                {aiVocabList.length > 0 && <button onClick={handleExpandVocab} className="w-full mt-2 text-xs text-indigo-600 dark:text-indigo-400 underline text-center">换一批</button>}
+                {aiVocabList.map((item, idx) => {
+                  // 根据词性选择颜色
+                  const meaning = (item.meaning || '').toLowerCase();
+                  const colorScheme = meaning.includes('n.') || meaning.includes('名词') 
+                    ? { border: 'border-l-blue-500', bg: 'bg-blue-50/50 dark:bg-blue-900/10', word: 'text-blue-600 dark:text-blue-400', tag: 'bg-blue-100 dark:bg-blue-900/50 text-blue-700 dark:text-blue-300' }
+                    : meaning.includes('v.') || meaning.includes('动词')
+                    ? { border: 'border-l-emerald-500', bg: 'bg-emerald-50/50 dark:bg-emerald-900/10', word: 'text-emerald-600 dark:text-emerald-400', tag: 'bg-emerald-100 dark:bg-emerald-900/50 text-emerald-700 dark:text-emerald-300' }
+                    : meaning.includes('adj') || meaning.includes('形容词')
+                    ? { border: 'border-l-purple-500', bg: 'bg-purple-50/50 dark:bg-purple-900/10', word: 'text-purple-600 dark:text-purple-400', tag: 'bg-purple-100 dark:bg-purple-900/50 text-purple-700 dark:text-purple-300' }
+                    : meaning.includes('adv') || meaning.includes('副词')
+                    ? { border: 'border-l-amber-500', bg: 'bg-amber-50/50 dark:bg-amber-900/10', word: 'text-amber-600 dark:text-amber-400', tag: 'bg-amber-100 dark:bg-amber-900/50 text-amber-700 dark:text-amber-300' }
+                    : { border: 'border-l-indigo-500', bg: 'bg-indigo-50/50 dark:bg-indigo-900/10', word: 'text-indigo-600 dark:text-indigo-400', tag: 'bg-indigo-100 dark:bg-indigo-900/50 text-indigo-700 dark:text-indigo-300' };
+                  
+                  return (
+                    <div key={idx} className={`${colorScheme.bg} p-3 rounded-xl border-l-4 ${colorScheme.border} border border-slate-200 dark:border-slate-700 shadow-sm relative group`}>
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <span className={`font-bold text-sm ${colorScheme.word}`}>{item.word}</span>
+                        <span className={`text-xs px-2 py-0.5 rounded-full ${colorScheme.tag}`}>{item.meaning}</span>
+                      </div>
+                      {item.collocation && (
+                        <div className="text-xs text-slate-500 dark:text-slate-400 mt-1">
+                          <span className="text-slate-400">搭配: </span>
+                          <span className="text-slate-600 dark:text-slate-300">{item.collocation}</span>
+                        </div>
+                      )}
+                      <div className="text-[10px] text-amber-600 dark:text-amber-400 mt-1.5 italic pr-6 line-clamp-2 bg-amber-50/50 dark:bg-amber-900/20 p-1.5 rounded">
+                        💡 {item.scenario?.replace('Thinking:', '').trim()}
+                      </div>
+                      <button 
+                        onClick={() => onAddGeneratedVocab({...item, sourceTopic: currentTopic, timestamp: Date.now()})}
+                        className="absolute top-2 right-2 text-indigo-400 hover:text-indigo-600 dark:hover:text-indigo-300 bg-white dark:bg-slate-800 p-1.5 rounded-full shadow-sm hover:shadow transition-all"
+                      >
+                        <PlusCircle className="w-4 h-4" />
+                      </button>
+                    </div>
+                  );
+                })}
+                {aiVocabList.length > 0 && (
+                  <Ripples>
+                    <button onClick={handleExpandVocab} className="w-full mt-2 text-xs text-indigo-600 dark:text-indigo-400 underline text-center py-2 min-h-[44px]">换一批</button>
+                  </Ripples>
+                )}
               </div>
             </div>
 
             {/* Static */}
-            {STATIC_VOCAB_LISTS.map((list, idx) => (
-              <div key={idx} className="mb-4">
-                <h4 className="font-bold text-slate-700 dark:text-slate-300 mb-2 border-b border-slate-200 dark:border-slate-700 pb-1 text-xs uppercase tracking-wider">{list.category}</h4>
-                <div className="space-y-2">
-                  {list.words.map((item, wIdx) => (
-                    <div key={wIdx} className="bg-white dark:bg-slate-800 p-2 rounded border border-slate-100 dark:border-slate-700 shadow-sm text-sm">
-                      <div className="flex justify-between"><span className="font-bold text-slate-700 dark:text-slate-200">{item.word}</span><span className="text-xs text-slate-500">{item.meaning}</span></div>
-                      <div className="text-xs text-slate-400 mt-0.5">搭配: {item.col}</div>
-                    </div>
-                  ))}
+            {STATIC_VOCAB_LISTS.map((list, idx) => {
+              // 为不同分类设置不同的主题色
+              const categoryColors = [
+                { header: 'text-blue-700 dark:text-blue-300 border-blue-200 dark:border-blue-800', accent: 'text-blue-600 dark:text-blue-400' },
+                { header: 'text-emerald-700 dark:text-emerald-300 border-emerald-200 dark:border-emerald-800', accent: 'text-emerald-600 dark:text-emerald-400' },
+                { header: 'text-purple-700 dark:text-purple-300 border-purple-200 dark:border-purple-800', accent: 'text-purple-600 dark:text-purple-400' },
+              ];
+              const colors = categoryColors[idx % categoryColors.length];
+              
+              return (
+                <div key={idx} className="mb-4">
+                  <h4 className={`font-bold mb-3 border-b pb-2 text-xs uppercase tracking-wider ${colors.header}`}>
+                    {list.category}
+                  </h4>
+                  <div className="space-y-2">
+                    {list.words.map((item, wIdx) => (
+                      <div key={wIdx} className="bg-white dark:bg-slate-800 p-3 rounded-xl border border-slate-100 dark:border-slate-700 shadow-sm hover:shadow-md transition-shadow">
+                        <div className="flex items-center justify-between gap-2">
+                          <span className={`font-bold text-sm ${colors.accent}`}>{item.word}</span>
+                          <span className="text-xs text-slate-500 dark:text-slate-400 bg-slate-100 dark:bg-slate-700 px-2 py-0.5 rounded-full">{item.meaning}</span>
+                        </div>
+                        <div className="text-xs text-slate-500 dark:text-slate-400 mt-1.5 flex items-center gap-1">
+                          <span className="text-slate-400">搭配:</span>
+                          <span className="text-slate-600 dark:text-slate-300 font-medium">{item.col}</span>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
                 </div>
-              </div>
-            ))}
+              );
+            })}
           </div>
         )}
 
         {activeTab === 'myVocab' && (
           <div className="animate-fadeIn space-y-3">
              {savedVocab.length === 0 ? <div className="text-center py-10 text-slate-400 text-sm"><Sparkles className="w-8 h-8 mx-auto mb-2 opacity-30" /><p>暂无收藏</p></div> : 
-               savedVocab.map((item, idx) => (
-                 <div key={idx} className={`rounded-lg border transition-all duration-200 overflow-hidden ${expandedVocabIndex === idx ? 'bg-amber-50 dark:bg-amber-900/20 border-amber-300 dark:border-amber-700' : 'bg-white dark:bg-slate-800 border-amber-100 dark:border-slate-700'}`}>
-                    <div className="p-3 relative cursor-pointer" onClick={() => toggleVocabExpand(idx)}>
-                      <button onClick={(e) => { e.stopPropagation(); onRemoveVocab(idx); }} className="absolute top-3 right-8 text-slate-300 hover:text-red-500 z-10"><Trash2 className="w-3 h-3" /></button>
-                      <div className="absolute top-3 right-2 text-slate-400">{expandedVocabIndex === idx ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}</div>
-                      <div className="font-bold text-slate-800 dark:text-slate-200 text-sm flex items-center gap-2">{item.word} <span className="text-xs font-normal text-slate-500 dark:text-slate-400 bg-white/50 dark:bg-slate-700 px-1.5 py-0.5 rounded border border-slate-100 dark:border-slate-600">{item.meaning}</span></div>
-                    </div>
-                    {expandedVocabIndex === idx && (
-                      <div className="px-3 pb-3 pt-0 border-t border-amber-200/50 dark:border-amber-800/50 text-sm animate-fadeIn">
-                        {item.scenario && <div className="mt-2 text-xs text-amber-800 dark:text-amber-200 bg-amber-100/50 dark:bg-amber-900/30 p-2 rounded flex gap-2"><Lightbulb className="w-3 h-3 flex-shrink-0 mt-0.5" /><div><span className="font-bold">场景:</span> {item.scenario.replace('Thinking:', '')}</div></div>}
-                        {item.example && <div className="mt-2 text-xs bg-white dark:bg-slate-900 p-2 rounded border border-amber-100 dark:border-slate-700 italic text-slate-600 dark:text-slate-300 relative"><Quote className="w-3 h-3 text-amber-300 absolute -top-1.5 -left-1 bg-white dark:bg-slate-900 px-0.5" />{item.example}</div>}
+               savedVocab.map((item, idx) => {
+                 // 根据词性选择颜色
+                 const meaning = (item.meaning || '').toLowerCase();
+                 const colorScheme = meaning.includes('n.') || meaning.includes('名词') 
+                   ? { border: 'border-l-blue-500', bg: 'bg-blue-50/30 dark:bg-blue-900/10', word: 'text-blue-600 dark:text-blue-400', tag: 'bg-blue-100 dark:bg-blue-900/50 text-blue-700 dark:text-blue-300', expandBg: 'bg-blue-50 dark:bg-blue-900/20 border-blue-300 dark:border-blue-700' }
+                   : meaning.includes('v.') || meaning.includes('动词')
+                   ? { border: 'border-l-emerald-500', bg: 'bg-emerald-50/30 dark:bg-emerald-900/10', word: 'text-emerald-600 dark:text-emerald-400', tag: 'bg-emerald-100 dark:bg-emerald-900/50 text-emerald-700 dark:text-emerald-300', expandBg: 'bg-emerald-50 dark:bg-emerald-900/20 border-emerald-300 dark:border-emerald-700' }
+                   : meaning.includes('adj') || meaning.includes('形容词')
+                   ? { border: 'border-l-purple-500', bg: 'bg-purple-50/30 dark:bg-purple-900/10', word: 'text-purple-600 dark:text-purple-400', tag: 'bg-purple-100 dark:bg-purple-900/50 text-purple-700 dark:text-purple-300', expandBg: 'bg-purple-50 dark:bg-purple-900/20 border-purple-300 dark:border-purple-700' }
+                   : meaning.includes('adv') || meaning.includes('副词')
+                   ? { border: 'border-l-amber-500', bg: 'bg-amber-50/30 dark:bg-amber-900/10', word: 'text-amber-600 dark:text-amber-400', tag: 'bg-amber-100 dark:bg-amber-900/50 text-amber-700 dark:text-amber-300', expandBg: 'bg-amber-50 dark:bg-amber-900/20 border-amber-300 dark:border-amber-700' }
+                   : { border: 'border-l-rose-500', bg: 'bg-rose-50/30 dark:bg-rose-900/10', word: 'text-rose-600 dark:text-rose-400', tag: 'bg-rose-100 dark:bg-rose-900/50 text-rose-700 dark:text-rose-300', expandBg: 'bg-rose-50 dark:bg-rose-900/20 border-rose-300 dark:border-rose-700' };
+                 
+                 return (
+                   <div key={idx} className={`rounded-xl border-l-4 ${colorScheme.border} border transition-all duration-200 overflow-hidden ${expandedVocabIndex === idx ? colorScheme.expandBg : `${colorScheme.bg} border-slate-200 dark:border-slate-700`}`}>
+                      <div className="p-3 relative cursor-pointer" onClick={() => toggleVocabExpand(idx)}>
+                        <Ripples>
+                        <button onClick={(e) => { e.stopPropagation(); onRemoveVocab(idx); }} className="absolute top-3 right-8 text-slate-300 hover:text-red-500 z-10 p-2 min-h-[44px] min-w-[44px] flex items-center justify-center rounded-full"><Trash2 className="w-4 h-4" /></button>
+                      </Ripples>
+                        <div className="absolute top-3 right-2 text-slate-400">{expandedVocabIndex === idx ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}</div>
+                        <div className="flex items-center gap-2 flex-wrap">
+                          <span className={`font-bold text-sm ${colorScheme.word}`}>{item.word}</span>
+                          <span className={`text-xs px-2 py-0.5 rounded-full ${colorScheme.tag}`}>{item.meaning}</span>
+                        </div>
+                        {item.collocation && (
+                          <div className="text-xs text-slate-500 dark:text-slate-400 mt-1">
+                            <span className="text-slate-400">搭配: </span>
+                            <span className="text-slate-600 dark:text-slate-300">{item.collocation}</span>
+                          </div>
+                        )}
                       </div>
-                    )}
-                 </div>
-               ))
+                      {expandedVocabIndex === idx && (
+                        <div className="px-3 pb-3 pt-0 border-t border-slate-200/50 dark:border-slate-700/50 text-sm animate-fadeIn">
+                          {item.scenario && (
+                            <div className="mt-2 text-xs text-amber-700 dark:text-amber-300 bg-amber-100/50 dark:bg-amber-900/30 p-2.5 rounded-lg flex gap-2">
+                              <Lightbulb className="w-3.5 h-3.5 flex-shrink-0 mt-0.5 text-amber-500" />
+                              <div><span className="font-bold">使用场景:</span> {item.scenario.replace('Thinking:', '').trim()}</div>
+                            </div>
+                          )}
+                          {item.example && (
+                            <div className="mt-2 text-xs bg-white dark:bg-slate-900 p-2.5 rounded-lg border border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-300 relative">
+                              <Quote className="w-3 h-3 text-emerald-400 absolute -top-1.5 -left-1 bg-white dark:bg-slate-900 px-0.5" />
+                              <span className="text-emerald-600 dark:text-emerald-400 font-medium">例句: </span>
+                              {item.example}
+                            </div>
+                          )}
+                        </div>
+                      )}
+                   </div>
+                 );
+               })
              }
           </div>
         )}
@@ -423,10 +857,23 @@ const VocabSidebar = ({ isOpen, toggle, currentTopic, savedVocab, savedErrors, o
           <div className="animate-fadeIn space-y-3">
             {savedErrors.length === 0 ? <div className="text-center py-10 text-slate-400 text-sm"><CheckCircle className="w-8 h-8 mx-auto mb-2 opacity-30" /><p>暂无错题</p></div> :
                savedErrors.map((err, idx) => (
-                 <div key={idx} className="bg-red-50/50 dark:bg-red-900/10 p-3 rounded-lg border border-red-100 dark:border-red-900/30 relative">
-                    <button onClick={() => onRemoveError(idx)} className="absolute top-2 right-2 text-slate-300 hover:text-red-500"><Trash2 className="w-4 h-4" /></button>
-                    <div className="space-y-1 text-sm"><div className="text-red-800 dark:text-red-300 line-through text-xs">{err.original}</div><div className="text-green-800 dark:text-green-300 font-medium">{err.correction}</div></div>
-                    <div className="mt-2 text-xs text-slate-500 dark:text-slate-400 border-t border-red-100 dark:border-red-900/30 pt-1"><span className="font-bold text-red-400">问题:</span> {err.issue}</div>
+                 <div key={idx} className="bg-gradient-to-r from-red-50 to-orange-50 dark:from-red-900/20 dark:to-orange-900/20 p-4 rounded-xl border-l-4 border-l-red-500 border border-red-200 dark:border-red-800/50 relative">
+                    <Ripples>
+                      <button onClick={() => onRemoveError(idx)} className="absolute top-2 right-2 text-slate-300 hover:text-red-500 p-2 min-h-[44px] min-w-[44px] flex items-center justify-center rounded-full"><Trash2 className="w-4 h-4" /></button>
+                    </Ripples>
+                    <div className="space-y-2 text-sm pr-8">
+                      <div className="flex items-start gap-2">
+                        <span className="text-red-500 text-xs font-medium px-2 py-0.5 bg-red-100 dark:bg-red-900/50 rounded-full flex-shrink-0">原文</span>
+                        <span className="text-red-700 dark:text-red-300 line-through">{err.original}</span>
+                      </div>
+                      <div className="flex items-start gap-2">
+                        <span className="text-emerald-500 text-xs font-medium px-2 py-0.5 bg-emerald-100 dark:bg-emerald-900/50 rounded-full flex-shrink-0">修正</span>
+                        <span className="text-emerald-700 dark:text-emerald-300 font-medium">{err.correction}</span>
+                      </div>
+                    </div>
+                    <div className="mt-3 pt-2 text-xs text-slate-600 dark:text-slate-400 border-t border-red-200 dark:border-red-800/50">
+                      <span className="text-amber-600 dark:text-amber-400 font-medium">⚠️ 问题:</span> {err.issue}
+                    </div>
                  </div>
                ))
              }
@@ -434,10 +881,21 @@ const VocabSidebar = ({ isOpen, toggle, currentTopic, savedVocab, savedErrors, o
         )}
       </div>
       
-      <div className="p-4 bg-slate-50 dark:bg-slate-800 border-t border-slate-200 dark:border-slate-700 text-xs flex gap-2">
-          <button onClick={onExportData} className="flex-1 flex items-center justify-center gap-1 bg-white dark:bg-slate-700 border border-slate-200 dark:border-slate-600 py-2 rounded hover:bg-slate-100 dark:hover:bg-slate-600"><Download className="w-3 h-3" /> 导出</button>
-          <button onClick={() => fileInputRef.current?.click()} className="flex-1 flex items-center justify-center gap-1 bg-white dark:bg-slate-700 border border-slate-200 dark:border-slate-600 py-2 rounded hover:bg-slate-100 dark:hover:bg-slate-600"><FileJson className="w-3 h-3" /> 导入</button>
-          <input type="file" ref={fileInputRef} className="hidden" accept=".json" onChange={handleFileChange} />
+      {/* 底部操作栏 */}
+      <div className="px-6 py-4 pb-safe glass border-t border-slate-200/50 dark:border-slate-700/50 flex gap-3">
+        <button 
+          onClick={onExportData} 
+          className="flex-1 py-3.5 rounded-2xl bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 text-[15px] font-medium flex items-center justify-center gap-2 active:scale-[0.98] transition-transform"
+        >
+          <Download className="w-4 h-4" /> 导出
+        </button>
+        <button 
+          onClick={() => fileInputRef.current?.click()} 
+          className="flex-1 py-3.5 rounded-2xl bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 text-[15px] font-medium flex items-center justify-center gap-2 active:scale-[0.98] transition-transform"
+        >
+          <FileJson className="w-4 h-4" /> 导入
+        </button>
+        <input type="file" ref={fileInputRef} className="hidden" accept=".json" onChange={handleFileChange} />
       </div>
     </div>
   );
@@ -449,18 +907,33 @@ const QuestionVisualizer = ({ data }) => {
   useEffect(() => { setImgSrc(data.defaultImage); }, [data]);
   const handleFileUpload = (e) => { if(e.target.files[0]) setImgSrc(URL.createObjectURL(e.target.files[0])); };
 
-  if (data.visualType === "table") return <div className="mb-6 bg-white dark:bg-slate-800 rounded-lg p-4 border border-slate-200 dark:border-slate-700 text-center text-sm dark:text-slate-300"><TableIcon className="w-6 h-6 mx-auto mb-2 text-indigo-500" />{data.description}</div>;
+  if (data.visualType === "table") {
+    return (
+      <div className="mb-8 card-breathe text-center">
+        <TableIcon className="w-8 h-8 mx-auto mb-3 text-indigo-500" />
+        <p className="text-[15px] text-slate-600 dark:text-slate-300">{data.description}</p>
+      </div>
+    );
+  }
 
   return (
-    <div className="mb-6 bg-slate-100 dark:bg-slate-900 rounded-lg overflow-hidden border border-slate-200 dark:border-slate-700 relative group">
-      <div className="flex items-center justify-center min-h-[200px] max-h-[600px] p-4">
-        <img src={imgSrc} alt="Exam" className="max-w-full max-h-[600px] object-contain rounded" onError={(e)=>{e.target.src="https://placehold.co/800x400?text=Image+Error"}} />
+    <div className="mb-8 rounded-3xl overflow-hidden bg-slate-100 dark:bg-slate-800 relative group">
+      <div className="flex items-center justify-center min-h-[220px] max-h-[400px] p-4">
+        <img 
+          src={imgSrc} 
+          alt="Exam" 
+          className="max-w-full max-h-[380px] object-contain rounded-2xl" 
+          onError={(e) => {e.target.src="https://placehold.co/800x400?text=Image+Error"}} 
+        />
       </div>
-      <div className="absolute top-2 right-2 opacity-0 group-hover:opacity-100 transition-opacity z-10">
-         <button onClick={() => fileInputRef.current?.click()} className="bg-white/90 dark:bg-slate-800/90 p-1.5 rounded shadow text-xs font-bold flex items-center gap-1 text-slate-700 dark:text-slate-200"><Upload className="w-3 h-3" /> 上传</button>
-         <input type="file" ref={fileInputRef} className="hidden" accept="image/*" onChange={handleFileUpload} />
-      </div>
-      <div className="bg-black/60 text-white text-xs p-2 text-center backdrop-blur-sm">{data.description}</div>
+      {/* 上传按钮 - 更隐蔽 */}
+      <button 
+        onClick={() => fileInputRef.current?.click()} 
+        className="absolute top-4 right-4 bg-white/90 dark:bg-slate-900/90 backdrop-blur-sm p-3 rounded-2xl shadow-lg opacity-0 group-hover:opacity-100 md:opacity-100 transition-opacity active:scale-95"
+      >
+        <Upload className="w-4 h-4 text-slate-600 dark:text-slate-300" />
+      </button>
+      <input type="file" ref={fileInputRef} className="hidden" accept="image/*" onChange={handleFileUpload} />
     </div>
   );
 };
@@ -483,13 +956,44 @@ const TopicGeneratorModal = ({ isOpen, onClose, onGenerate }) => {
 
   if(!isOpen) return null;
   return (
-    <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
-      <div className="bg-white dark:bg-slate-800 rounded-xl p-6 w-full max-w-md shadow-2xl">
-        <div className="flex justify-between mb-4"><h3 className="font-bold text-lg dark:text-white">AI 自定义出题</h3><button onClick={onClose}><X className="w-5 h-5 text-slate-400"/></button></div>
-        <input className="w-full p-3 border rounded mb-4 bg-slate-50 dark:bg-slate-900 dark:border-slate-600 dark:text-white" placeholder="输入主题 (如: 网络暴力)" value={input} onChange={e=>setInput(e.target.value)} />
-        <button onClick={handleGen} disabled={loading} className="w-full py-3 bg-indigo-600 text-white rounded font-bold">{loading?"生成中...":"立即生成"}</button>
+    <>
+      <div className="fixed inset-0 bg-black/40 z-50 animate-fadeIn" onClick={onClose} />
+      <div className="fixed inset-x-0 bottom-0 md:inset-0 md:flex md:items-center md:justify-center z-50 p-0 md:p-4">
+        <div className="bg-white dark:bg-slate-900 rounded-t-3xl md:rounded-3xl w-full md:max-w-md shadow-2xl animate-slideUp">
+          {/* 拖动指示器 (移动端) */}
+          <div className="md:hidden w-12 h-1 bg-slate-300 dark:bg-slate-700 rounded-full mx-auto mt-3" />
+          
+          <div className="p-6">
+            <h3 className="font-semibold text-xl text-slate-800 dark:text-slate-100 mb-2">AI 智能出题</h3>
+            <p className="text-[15px] text-slate-500 mb-6">输入任意主题，AI 将为你生成完整的作文练习题</p>
+            
+            <input 
+              className="input-field mb-6" 
+              placeholder="例如：网络暴力、环境保护、人工智能..." 
+              value={input} 
+              onChange={e => setInput(e.target.value)} 
+            />
+            
+            <div className="flex gap-3">
+              <button 
+                onClick={onClose} 
+                className="btn-secondary flex-1"
+              >
+                取消
+              </button>
+              <button 
+                onClick={handleGen} 
+                disabled={loading || !input} 
+                className={`btn-primary flex-[2] flex items-center justify-center gap-2 ${(!input || loading) ? 'opacity-50' : ''}`}
+              >
+                {loading ? <Loader className="w-5 h-5 animate-spin" /> : <Sparkles className="w-5 h-5" />}
+                <span>{loading ? "生成中..." : "生成题目"}</span>
+              </button>
+            </div>
+          </div>
+        </div>
       </div>
-    </div>
+    </>
   );
 };
 
@@ -498,141 +1002,440 @@ const EssayWorkflowManager = ({ data, onSaveVocab, onSaveError, onSaveHistory })
   const [inputs, setInputs] = useState({cn:{}, en:{}});
   const [feedback, setFeedback] = useState({cn:{}, en:{}, final:null});
   const [loading, setLoading] = useState(null);
+  const [finalEssayText, setFinalEssayText] = useState(null);
+  const [initialEssayText, setInitialEssayText] = useState(null);
+  const [isFullscreenEditor, setIsFullscreenEditor] = useState(false);
+  useEffect(() => { 
+    setStep(0); 
+    setInputs({cn:{}, en:{}}); 
+    setFeedback({cn:{}, en:{}, final:null}); 
+    setFinalEssayText(null);
+    setInitialEssayText(null);
+    // 清除该题目的对话历史
+    clearConversationHistory(`logic_${data.id}`);
+    clearConversationHistory(`grammar_${data.id}`);
+    clearConversationHistory(`scoring_${data.id}`);
+  }, [data]);
 
-  useEffect(() => { setStep(0); setInputs({cn:{}, en:{}}); setFeedback({cn:{}, en:{}, final:null}); }, [data]);
+  // Initialize essay text when entering step 2
+  useEffect(() => {
+    if (step === 2) {
+      const generatedText = (() => {
+        let txt = data.templateString || "";
+        data.slots.forEach(s => txt = txt.replace(`{{${s.id}}}`, inputs.en[s.id]||`[${s.label}]`));
+        return txt;
+      })();
+      
+      // If finalEssayText is null, initialize both
+      if (finalEssayText === null) {
+        setInitialEssayText(generatedText);
+        setFinalEssayText(generatedText);
+      } else if (initialEssayText !== generatedText) {
+        // If inputs changed (generated text is different), update initialEssayText
+        // but keep the user's edited finalEssayText
+        setInitialEssayText(generatedText);
+      }
+    }
+  }, [step, data, inputs, finalEssayText, initialEssayText]);
 
   const handleLogic = async (id) => {
     if (!inputs.cn[id]) return;
     setLoading(id);
-    const p = `Task: Kaoyan Logic Check. Topic: ${data.title}. User Idea: "${inputs.cn[id]}". Output JSON: { "status": "pass/warn", "comment": "Chinese feedback", "suggestion": "Improvement" }`;
     try {
-      const res = await callAI(p, true);
+      const prompt = buildPrompt('logic', {
+        topic: data.title,
+        description: data.description,
+        userInput: inputs.cn[id]
+      });
+      const res = await callAI(prompt || `Task: Kaoyan Logic Check. Topic: ${data.title}. User Idea: "${inputs.cn[id]}". Output JSON: { "status": "pass/warn", "comment": "Chinese feedback", "suggestion": "Improvement" }`, true);
       const json = JSON.parse(res.replace(/```json|```/g,''));
       setFeedback(prev => ({...prev, cn: {...prev.cn, [id]: json}}));
       onSaveHistory(data.id, { type: 'logic', input: inputs.cn[id], feedback: json, timestamp: Date.now() });
-    } catch(e) {}
+    } catch(e) { console.error('Logic check error:', e); }
     setLoading(null);
   };
 
   const handleGrammar = async (id) => {
     if (!inputs.en[id]) return;
     setLoading(id);
-    const p = `Task: Kaoyan Grammar Check. Topic: ${data.title}. CN: "${inputs.cn[id]}". EN: "${inputs.en[id]}". Output JSON: { "score": 1-10, "comment": "Chinese feedback", "grammar_issues": [], "recommended_vocab": [{ "word": "word", "meaning": "meaning", "collocation": "col", "example": "Contextual example sentence", "scenario": "Thinking context" }] }`;
     try {
-      const json = JSON.parse((await callAI(p, true)).replace(/```json|```/g,''));
+      const prompt = buildPrompt('grammar', {
+        topic: data.title,
+        description: data.description,
+        chineseInput: inputs.cn[id],
+        englishInput: inputs.en[id]
+      });
+      const res = await callAI(prompt || `Task: Kaoyan Grammar Check. Topic: ${data.title}. CN: "${inputs.cn[id]}". EN: "${inputs.en[id]}". Output JSON: { "score": 1-10, "comment": "Chinese feedback", "grammar_issues": [], "recommended_vocab": [{ "word": "word", "meaning": "meaning", "collocation": "col", "example": "Contextual example sentence", "scenario": "Thinking context" }] }`, true);
+      const json = JSON.parse(res.replace(/```json|```/g,''));
       setFeedback(prev => ({...prev, en: {...prev.en, [id]: json}}));
       onSaveHistory(data.id, { type: 'grammar', input: inputs.en[id], feedback: json, timestamp: Date.now() });
       if (json.grammar_issues?.length) json.grammar_issues.forEach(err => onSaveError({...err, timestamp: Date.now()}));
-    } catch(e) {}
+    } catch(e) { console.error('Grammar check error:', e); }
     setLoading(null);
+  };
+
+  const generateEssayText = () => {
+    let txt = data.templateString || "";
+    data.slots.forEach(s => txt = txt.replace(`{{${s.id}}}`, inputs.en[s.id]||`[${s.label}]`));
+    return txt;
+  };
+
+  const handleResetEssay = () => {
+    const initialText = generateEssayText();
+    setInitialEssayText(initialText);
+    setFinalEssayText(initialText);
   };
 
   const handleFinal = async () => {
     setLoading('final');
-    let text = data.templateString || "";
-    data.slots.forEach(s => text = text.replace(`{{${s.id}}}`, inputs.en[s.id]||`[${s.label}]`));
-    const p = `Task: Grade Essay (20pts). Topic: ${data.title}. Text: ${text}. Output JSON: { "score": number, "comment": "Chinese feedback", "strengths": [], "weaknesses": [] }`;
+    const text = finalEssayText || generateEssayText();
     try {
-      const json = JSON.parse((await callAI(p, true)).replace(/```json|```/g,'').trim());
+      const prompt = buildPrompt('scoring', {
+        topic: data.title,
+        description: data.description,
+        essay: text
+      });
+      const res = await callAI(prompt || `Task: Grade Essay (20pts). Topic: ${data.title}. Text: ${text}. Output JSON: { "score": number, "comment": "Chinese feedback", "strengths": [], "weaknesses": [] }`, true);
+      const json = JSON.parse(res.replace(/```json|```/g,'').trim());
       setFeedback(prev => ({...prev, final: json}));
       onSaveHistory(data.id, { type: 'final', input: text, feedback: json, timestamp: Date.now() });
-    } catch(e) { console.error(e); }
+    } catch(e) { console.error('Scoring error:', e); }
     setLoading(null);
   };
 
   return (
     <div>
-      <div className="flex justify-between mb-6 px-4">
-        {["中文思考", "词句翻译", "成文打分"].map((t,i) => (
-          <div key={i} className={`flex flex-col items-center ${i<=step?'opacity-100':'opacity-40'}`}>
-            <div className={`w-8 h-8 rounded-full border-2 flex items-center justify-center ${i<=step?'bg-white dark:bg-slate-800 border-indigo-500':'bg-slate-100 dark:bg-slate-700 border-slate-300'}`}>{i+1}</div>
-            <span className="text-[10px] mt-1 font-bold dark:text-slate-300">{t}</span>
+      {/* 步骤指示器 - 乔布斯极简风格 */}
+      <div className="flex justify-center items-center gap-3 mb-8 py-2">
+        {["思考", "翻译", "成文"].map((t, i) => (
+          <div key={i} className="flex items-center gap-3">
+            <div className={`flex items-center gap-2 transition-all duration-500 ${i === step ? 'opacity-100' : i < step ? 'opacity-60' : 'opacity-30'}`}>
+              <div className={`w-8 h-8 rounded-full flex items-center justify-center text-sm font-semibold transition-all duration-500 ${
+                i === step 
+                  ? 'bg-indigo-600 text-white scale-110' 
+                  : i < step 
+                    ? 'bg-indigo-100 dark:bg-indigo-900/50 text-indigo-600 dark:text-indigo-400' 
+                    : 'bg-slate-100 dark:bg-slate-800 text-slate-400'
+              }`}>
+                {i < step ? <Check className="w-4 h-4" /> : i + 1}
+              </div>
+              <span className={`text-[13px] font-medium hidden sm:block ${i === step ? 'text-slate-800 dark:text-slate-200' : 'text-slate-400'}`}>{t}</span>
+            </div>
+            {i < 2 && <div className={`w-8 h-0.5 rounded-full transition-colors duration-500 ${i < step ? 'bg-indigo-400' : 'bg-slate-200 dark:bg-slate-700'}`} />}
           </div>
         ))}
       </div>
 
       {step === 0 && (
-        <div className="space-y-4 animate-fadeIn">
+        <div className="space-y-6 animate-slideUp">
           {data.slots.map(slot => (
-            <div key={slot.id} className="bg-white dark:bg-slate-800 p-4 rounded-xl border border-slate-200 dark:border-slate-700 relative overflow-hidden">
-              <div className="absolute left-0 top-0 bottom-0 w-1 bg-blue-500"></div>
-              <h5 className="font-bold text-slate-800 dark:text-slate-100 text-sm mb-2">{slot.label}</h5>
-              <p className="text-xs text-slate-500 dark:text-slate-400 mb-2">{slot.question}</p>
+            <div key={slot.id} className="card-breathe">
+              <h5 className="font-semibold text-slate-800 dark:text-slate-100 text-[17px] mb-1">{slot.label}</h5>
+              <p className="text-[15px] text-slate-500 dark:text-slate-400 mb-4">{slot.question}</p>
               <textarea 
-                className="w-full p-2 border rounded bg-slate-50 dark:bg-slate-900 dark:border-slate-600 text-sm dark:text-slate-200" 
-                rows={2} 
+                className="input-field" 
+                rows={3} 
+                placeholder={slot.placeholder}
                 value={inputs.cn[slot.id]||''} 
                 onChange={e => setInputs(p => ({...p, cn: {...p.cn, [slot.id]: e.target.value}}))} 
               />
-              <div className="flex justify-end mt-2 items-center">
-                {feedback.cn[slot.id] && <div className="text-xs mr-auto bg-blue-50 dark:bg-blue-900/30 p-1 px-2 rounded text-blue-800 dark:text-blue-200"><SimpleMarkdown text={feedback.cn[slot.id].comment} /></div>}
-                <button onClick={() => handleLogic(slot.id)} disabled={loading===slot.id} className="bg-blue-600 text-white px-3 py-1 rounded text-xs flex items-center gap-1">{loading===slot.id?<Loader className="w-3 h-3 animate-spin"/>:<BrainCircuit className="w-3 h-3"/>} 审题</button>
-              </div>
+              {/* 反馈显示 */}
+              {feedback.cn[slot.id] && (
+                <div className="mt-4 space-y-3">
+                  {/* 状态显示 */}
+                  <LogicStatusDisplay status={feedback.cn[slot.id].status} />
+                  {/* 评语 */}
+                  <div className={`p-4 rounded-2xl ${
+                    feedback.cn[slot.id].status === 'pass' 
+                      ? 'bg-green-50 dark:bg-green-900/20' 
+                      : 'bg-amber-50 dark:bg-amber-900/20'
+                  }`}>
+                    <SimpleMarkdown text={feedback.cn[slot.id].comment} className={`text-[15px] ${
+                      feedback.cn[slot.id].status === 'pass'
+                        ? 'text-green-800 dark:text-green-200'
+                        : 'text-amber-800 dark:text-amber-200'
+                    }`} />
+                    {feedback.cn[slot.id].suggestion && (
+                      <div className="mt-3 pt-3 border-t border-slate-200 dark:border-slate-700">
+                        <span className="text-xs font-medium text-slate-500 mb-1 block">💡 建议</span>
+                        <p className="text-[14px] text-slate-600 dark:text-slate-300">{feedback.cn[slot.id].suggestion}</p>
+                      </div>
+                    )}
+                  </div>
+                  {/* 追问组件 */}
+                  <FollowUpChat
+                    contextId={`logic_${data.id}_${slot.id}`}
+                    initialContext={`题目: ${data.title}\n用户思路: ${inputs.cn[slot.id]}\nAI反馈: ${feedback.cn[slot.id].comment}`}
+                    title="继续追问"
+                    placeholder="对审题结果有疑问？继续追问..."
+                  />
+                </div>
+              )}
+              <button 
+                onClick={() => handleLogic(slot.id)} 
+                disabled={loading===slot.id} 
+                className="mt-4 w-full py-3.5 bg-slate-100 dark:bg-slate-700 text-slate-700 dark:text-slate-200 rounded-2xl font-medium flex items-center justify-center gap-2 active:scale-[0.98] transition-transform"
+              >
+                {loading===slot.id ? <Loader className="w-4 h-4 animate-spin"/> : <BrainCircuit className="w-4 h-4"/>}
+                <span>AI 审题</span>
+              </button>
             </div>
           ))}
-          <button onClick={() => setStep(1)} className="w-full py-3 bg-slate-800 dark:bg-slate-700 text-white rounded-lg font-bold shadow">下一步</button>
+          <button onClick={() => setStep(1)} className="btn-primary">
+            继续
+          </button>
         </div>
       )}
 
       {step === 1 && (
-        <div className="space-y-4 animate-fadeIn">
+        <div className="space-y-6 animate-slideUp">
           {data.slots.map(slot => (
-            <div key={slot.id} className="bg-white dark:bg-slate-800 p-4 rounded-xl border border-slate-200 dark:border-slate-700 relative overflow-hidden">
-              <div className="absolute left-0 top-0 bottom-0 w-1 bg-purple-500"></div>
-              <h5 className="font-bold text-slate-800 dark:text-slate-100 text-sm mb-2 flex justify-between">
-                {slot.label}
-                <span className="text-xs font-normal bg-slate-100 dark:bg-slate-700 px-2 rounded truncate max-w-[100px] text-slate-500 dark:text-slate-400">{inputs.cn[slot.id]}</span>
-              </h5>
+            <div key={slot.id} className="card-breathe">
+              <div className="flex items-start justify-between mb-4">
+                <h5 className="font-semibold text-slate-800 dark:text-slate-100 text-[17px]">{slot.label}</h5>
+                {inputs.cn[slot.id] && (
+                  <span className="text-[13px] text-slate-400 bg-slate-100 dark:bg-slate-700 px-3 py-1 rounded-full max-w-[120px] truncate">
+                    {inputs.cn[slot.id]}
+                  </span>
+                )}
+              </div>
               <textarea 
-                className="w-full p-2 border rounded bg-slate-50 dark:bg-slate-900 dark:border-slate-600 text-sm font-mono dark:text-slate-200" 
-                rows={2} 
+                className="input-field font-mono" 
+                rows={3} 
+                placeholder="Write your English translation here..."
                 value={inputs.en[slot.id]||''} 
                 onChange={e => setInputs(p => ({...p, en: {...p.en, [slot.id]: e.target.value}}))} 
               />
-              <div className="flex justify-end mt-2">
-                <button onClick={() => handleGrammar(slot.id)} disabled={loading===slot.id} className="bg-purple-600 text-white px-3 py-1 rounded text-xs flex items-center gap-1">{loading===slot.id?<Loader className="w-3 h-3 animate-spin"/>:<Sparkles className="w-3 h-3"/>} 润色</button>
-              </div>
+              {/* 反馈显示 */}
               {feedback.en[slot.id] && (
-                <div className="mt-2 text-xs bg-purple-50 dark:bg-purple-900/20 p-2 rounded">
-                  <div className="font-bold text-purple-700 dark:text-purple-300 mb-1">评分: {feedback.en[slot.id].score}/10</div>
-                  <div className="text-slate-600 dark:text-slate-300 mb-2"><SimpleMarkdown text={feedback.en[slot.id].comment} /></div>
-                  {feedback.en[slot.id].recommended_vocab?.map((v, i) => (
-                    <div key={i} className="flex justify-between items-center mt-2 bg-white dark:bg-slate-800 p-1.5 rounded border border-purple-100 dark:border-purple-800">
-                      <div><span className="font-bold text-slate-800 dark:text-slate-200">{v.word}</span> <span className="text-[10px] text-slate-500 dark:text-slate-400">{v.meaning}</span></div>
-                      <button onClick={() => onSaveVocab({...v, sourceTopic: data.title, timestamp: Date.now()})} className="text-purple-500 hover:bg-purple-100 p-1 rounded"><PlusCircle className="w-3 h-3" /></button>
+                <div className="mt-4 space-y-3">
+                  {/* 分数显示 */}
+                  <GrammarScoreDisplay score={feedback.en[slot.id].score} />
+                  {/* 评语 */}
+                  <div className="p-4 bg-slate-50 dark:bg-slate-800/50 rounded-2xl">
+                    <SimpleMarkdown text={feedback.en[slot.id].comment} className="text-[15px] text-slate-600 dark:text-slate-300" />
+                  </div>
+                  {/* 推荐词汇 */}
+                  {feedback.en[slot.id].recommended_vocab?.length > 0 && (
+                    <div className="space-y-2">
+                      <span className="text-xs font-medium text-slate-500 px-1 flex items-center gap-1">
+                        <span>📚</span> 推荐词汇
+                      </span>
+                      {feedback.en[slot.id].recommended_vocab.map((v, i) => {
+                        // 根据词性选择颜色
+                        const meaning = (v.meaning || '').toLowerCase();
+                        const colorScheme = meaning.includes('n.') || meaning.includes('名词') 
+                          ? { border: 'border-l-blue-500', bg: 'bg-blue-50/50 dark:bg-blue-900/10', word: 'text-blue-600 dark:text-blue-400', tag: 'bg-blue-100 dark:bg-blue-900/50 text-blue-700 dark:text-blue-300' }
+                          : meaning.includes('v.') || meaning.includes('动词')
+                          ? { border: 'border-l-emerald-500', bg: 'bg-emerald-50/50 dark:bg-emerald-900/10', word: 'text-emerald-600 dark:text-emerald-400', tag: 'bg-emerald-100 dark:bg-emerald-900/50 text-emerald-700 dark:text-emerald-300' }
+                          : meaning.includes('adj') || meaning.includes('形容词')
+                          ? { border: 'border-l-purple-500', bg: 'bg-purple-50/50 dark:bg-purple-900/10', word: 'text-purple-600 dark:text-purple-400', tag: 'bg-purple-100 dark:bg-purple-900/50 text-purple-700 dark:text-purple-300' }
+                          : { border: 'border-l-amber-500', bg: 'bg-amber-50/50 dark:bg-amber-900/10', word: 'text-amber-600 dark:text-amber-400', tag: 'bg-amber-100 dark:bg-amber-900/50 text-amber-700 dark:text-amber-300' };
+                        
+                        return (
+                          <div key={i} className={`p-3 ${colorScheme.bg} rounded-xl border-l-4 ${colorScheme.border} border border-slate-200 dark:border-slate-700`}>
+                            <div className="flex justify-between items-start gap-2">
+                              <div className="flex-1 min-w-0">
+                                <div className="flex items-center gap-2 flex-wrap">
+                                  <span className={`font-bold ${colorScheme.word}`}>{v.word}</span>
+                                  <span className={`text-xs px-2 py-0.5 rounded-full ${colorScheme.tag}`}>{v.meaning}</span>
+                                </div>
+                                {v.collocation && (
+                                  <div className="mt-1 text-sm">
+                                    <span className="text-slate-400">搭配: </span>
+                                    <span className="text-slate-600 dark:text-slate-300">{v.collocation}</span>
+                                  </div>
+                                )}
+                                {v.example && (
+                                  <div className="mt-1.5 text-sm text-slate-500 dark:text-slate-400 italic line-clamp-2">
+                                    {v.example}
+                                  </div>
+                                )}
+                              </div>
+                              <button 
+                                onClick={() => onSaveVocab({...v, sourceTopic: data.title, timestamp: Date.now()})} 
+                                className="flex-shrink-0 p-2 text-indigo-500 hover:text-indigo-700 dark:hover:text-indigo-300 hover:bg-indigo-100 dark:hover:bg-indigo-900/50 rounded-lg transition-colors"
+                              >
+                                <PlusCircle className="w-5 h-5" />
+                              </button>
+                            </div>
+                          </div>
+                        );
+                      })}
                     </div>
-                  ))}
+                  )}
+                  {/* 追问组件 */}
+                  <FollowUpChat
+                    contextId={`grammar_${data.id}_${slot.id}`}
+                    initialContext={`题目: ${data.title}\n中文: ${inputs.cn[slot.id]}\n英文: ${inputs.en[slot.id]}\nAI反馈: ${feedback.en[slot.id].comment}`}
+                    title="继续优化"
+                    placeholder="想要更好的表达？继续追问..."
+                  />
                 </div>
               )}
+              <button 
+                onClick={() => handleGrammar(slot.id)} 
+                disabled={loading===slot.id} 
+                className="mt-4 w-full py-3.5 bg-purple-100 dark:bg-purple-900/30 text-purple-700 dark:text-purple-300 rounded-2xl font-medium flex items-center justify-center gap-2 active:scale-[0.98] transition-transform"
+              >
+                {loading===slot.id ? <Loader className="w-4 h-4 animate-spin"/> : <Sparkles className="w-4 h-4"/>}
+                <span>AI 润色</span>
+              </button>
             </div>
           ))}
-          <div className="flex gap-2">
-            <button onClick={() => setStep(0)} className="flex-1 py-3 text-slate-500 dark:text-slate-400 border dark:border-slate-600 rounded-lg">上一步</button>
-            <button onClick={() => setStep(2)} className="flex-[2] py-3 bg-slate-800 dark:bg-slate-700 text-white rounded-lg font-bold shadow">下一步</button>
+          <div className="flex gap-3">
+            <button onClick={() => setStep(0)} className="btn-secondary flex-1">返回</button>
+            <button onClick={() => setStep(2)} className="btn-primary flex-[2]">继续</button>
           </div>
         </div>
       )}
 
       {step === 2 && (
-        <div className="space-y-4 animate-fadeIn">
-          <div className="bg-white dark:bg-slate-800 p-6 rounded-xl border border-slate-200 dark:border-slate-700 shadow min-h-[300px]">
-            <h2 className="text-center font-bold text-lg mb-4 underline decoration-slate-300 underline-offset-4 text-slate-800 dark:text-slate-100">{data.title}</h2>
-            <div className="whitespace-pre-wrap text-sm leading-loose font-serif text-slate-700 dark:text-slate-300">
-              {(() => {
-                let txt = data.templateString || "";
-                data.slots.forEach(s => txt = txt.replace(`{{${s.id}}}`, inputs.en[s.id]||`[${s.label}]`));
-                return txt;
-              })()}
+        <div className="space-y-6 animate-slideUp">
+          <div className="card-breathe">
+            <div className="flex justify-between items-center mb-6">
+              <h2 className="font-semibold text-xl text-slate-800 dark:text-slate-100">{data.title}</h2>
+              {finalEssayText && (
+                <span className="text-[13px] text-slate-400 bg-slate-100 dark:bg-slate-800 px-3 py-1 rounded-full">
+                  {finalEssayText.length} 字符
+                </span>
+              )}
             </div>
+            <div className="relative">
+              <textarea
+                value={finalEssayText || ''}
+                onChange={(e) => setFinalEssayText(e.target.value)}
+                onFocus={(e) => {
+                  if (window.innerWidth < 768) {
+                    e.target.blur();
+                    setIsFullscreenEditor(true);
+                  }
+                }}
+                className="input-field font-serif text-[17px] leading-8 min-h-[280px] resize-none"
+                placeholder="点击开始编辑你的作文..."
+                rows={10}
+              />
+              {finalEssayText && initialEssayText && finalEssayText !== initialEssayText && (
+                <button
+                  onClick={handleResetEssay}
+                  className="absolute top-3 right-3 bg-white dark:bg-slate-800 text-slate-500 p-2 rounded-xl shadow-sm active:scale-95 transition-transform"
+                >
+                  <RotateCcw className="w-4 h-4" />
+                </button>
+              )}
+            </div>
+            
+            {/* 移动端全屏编辑器 - 沉浸式体验 */}
+            {isFullscreenEditor && (
+              <div className="md:hidden fixed inset-0 z-50 bg-white dark:bg-slate-900 flex flex-col animate-slideUp">
+                <div className="px-6 py-4 glass border-b border-slate-200/50 dark:border-slate-700/50 flex justify-between items-center flex-shrink-0">
+                  <h3 className="font-semibold text-[17px] text-slate-800 dark:text-slate-100">{data.title}</h3>
+                  <button 
+                    onClick={() => setIsFullscreenEditor(false)}
+                    className="touch-target text-indigo-600 font-medium"
+                  >
+                    完成
+                  </button>
+                </div>
+                <div className="flex-1 overflow-y-auto">
+                  <textarea
+                    value={finalEssayText || ''}
+                    onChange={(e) => setFinalEssayText(e.target.value)}
+                    className="w-full h-full p-6 bg-transparent text-[17px] leading-8 font-serif text-slate-700 dark:text-slate-300 focus:outline-none resize-none"
+                    placeholder="开始写作..."
+                    autoFocus
+                  />
+                </div>
+                <div className="px-6 py-4 pb-safe glass border-t border-slate-200/50 dark:border-slate-700/50 flex-shrink-0">
+                  {finalEssayText && initialEssayText && finalEssayText !== initialEssayText && (
+                    <button
+                      onClick={handleResetEssay}
+                      className="w-full py-3.5 text-slate-500 rounded-2xl text-[15px] flex items-center justify-center gap-2 active:bg-slate-100 dark:active:bg-slate-800 transition-colors"
+                    >
+                      <RotateCcw className="w-4 h-4" />
+                      重置为模板
+                    </button>
+                  )}
+                </div>
+              </div>
+            )}
           </div>
-          <button onClick={handleFinal} disabled={loading==='final'} className="w-full py-3 bg-green-600 text-white rounded-lg font-bold shadow flex justify-center items-center gap-2">{loading==='final'?<Loader className="w-4 h-4 animate-spin"/>:<BookOpen className="w-4 h-4"/>} 最终阅卷</button>
+          
+          {/* 评分按钮 */}
+          <button 
+            onClick={handleFinal} 
+            disabled={loading==='final'} 
+            className="w-full py-4 bg-green-600 text-white rounded-2xl font-semibold text-[17px] flex justify-center items-center gap-2 active:scale-[0.98] transition-transform shadow-lg shadow-green-200 dark:shadow-green-900/30"
+          >
+            {loading==='final' ? <Loader className="w-5 h-5 animate-spin"/> : <BookOpen className="w-5 h-5"/>}
+            <span>提交阅卷</span>
+          </button>
+          
+          {/* 评分结果 - 更优雅的展示 */}
           {feedback.final && (
-            <div className="bg-slate-800 dark:bg-slate-900 text-white p-4 rounded-xl shadow-xl">
-              <div className="flex justify-between items-center mb-2 pb-2 border-b border-slate-600"><span className="font-bold">阅卷报告</span> <span className="text-2xl font-bold text-yellow-400">{feedback.final.score}</span></div>
-              <SimpleMarkdown text={feedback.final.comment} />
+            <div className="space-y-4">
+              {/* 分数卡片 */}
+              <FinalScoreDisplay score={feedback.final.score} />
+              
+              {/* 详细评语 */}
+              <div className="card-breathe">
+                <h4 className="font-medium text-slate-700 dark:text-slate-200 mb-3 flex items-center gap-2">
+                  <span>📝</span> 详细评语
+                </h4>
+                <SimpleMarkdown text={feedback.final.comment} className="text-[15px] text-slate-600 dark:text-slate-300 leading-relaxed" />
+                
+                {/* 优点和不足 */}
+                {(feedback.final.strengths?.length > 0 || feedback.final.weaknesses?.length > 0) && (
+                  <div className="mt-4 pt-4 border-t border-slate-200 dark:border-slate-700 grid grid-cols-1 md:grid-cols-2 gap-4">
+                    {feedback.final.strengths?.length > 0 && (
+                      <div className="p-4 bg-gradient-to-br from-emerald-50 to-green-50 dark:from-emerald-900/20 dark:to-green-900/20 rounded-xl border border-emerald-200 dark:border-emerald-800/50">
+                        <div className="flex items-center gap-2 mb-3">
+                          <span className="text-emerald-500">✅</span>
+                          <span className="font-medium text-emerald-700 dark:text-emerald-300 text-sm">优点</span>
+                        </div>
+                        <ul className="space-y-2">
+                          {feedback.final.strengths.map((s, i) => (
+                            <li key={i} className="flex items-start gap-2 text-[13px] text-emerald-700 dark:text-emerald-300">
+                              <span className="text-emerald-400 mt-0.5">•</span>
+                              <span>{s}</span>
+                            </li>
+                          ))}
+                        </ul>
+                      </div>
+                    )}
+                    {feedback.final.weaknesses?.length > 0 && (
+                      <div className="p-4 bg-gradient-to-br from-amber-50 to-orange-50 dark:from-amber-900/20 dark:to-orange-900/20 rounded-xl border border-amber-200 dark:border-amber-800/50">
+                        <div className="flex items-center gap-2 mb-3">
+                          <span className="text-amber-500">⚠️</span>
+                          <span className="font-medium text-amber-700 dark:text-amber-300 text-sm">待改进</span>
+                        </div>
+                        <ul className="space-y-2">
+                          {feedback.final.weaknesses.map((w, i) => (
+                            <li key={i} className="flex items-start gap-2 text-[13px] text-amber-700 dark:text-amber-300">
+                              <span className="text-amber-400 mt-0.5">•</span>
+                              <span>{w}</span>
+                            </li>
+                          ))}
+                        </ul>
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
+              
+              {/* 追问组件 */}
+              <FollowUpChat
+                contextId={`scoring_${data.id}`}
+                initialContext={`题目: ${data.title}\n作文: ${finalEssayText}\n评分: ${feedback.final.score}/20\n评语: ${feedback.final.comment}`}
+                title="深入分析"
+                placeholder="想了解更多？继续追问..."
+              />
             </div>
           )}
-          <button onClick={() => setStep(1)} className="w-full py-3 text-slate-500 dark:text-slate-400">返回修改</button>
+          
+          <button onClick={() => setStep(1)} className="btn-secondary">
+            返回修改
+          </button>
         </div>
       )}
     </div>
@@ -647,6 +1450,7 @@ const App = () => {
   const [historyDrawer, setHistoryDrawer] = useState(false);
   const [aiSettings, setAiSettings] = useState(false);
   const [authModal, setAuthModal] = useState(false);
+  const [profileSheet, setProfileSheet] = useState(false);
   const [user, setUser] = useState(null);
   const [username, setUsername] = useState(null);
   const [vocab, setVocab] = useState([]);
@@ -901,7 +1705,8 @@ const App = () => {
   return (
     <div className={dark?'dark':''}>
       <div className="min-h-screen bg-slate-50 dark:bg-slate-900 text-slate-900 dark:text-slate-100 transition-colors">
-        <nav className="sticky top-0 z-20 bg-white dark:bg-slate-800 border-b border-slate-200 dark:border-slate-700 px-4 h-14 flex items-center justify-between">
+        {/* 顶部导航栏 - 桌面端显示 */}
+        <nav className="hidden md:flex sticky top-0 z-20 bg-white dark:bg-slate-800 border-b border-slate-200 dark:border-slate-700 px-4 h-14 items-center justify-between">
           <div className="font-bold flex gap-2 items-center"><PenTool className="w-5 h-5 text-indigo-600"/> Kaoyan<span className="text-indigo-600">Master</span></div>
           <div className="flex gap-2 items-center">
             {migrating && (
@@ -914,34 +1719,117 @@ const App = () => {
               <div className="flex items-center gap-2 px-2 text-sm">
                 <User className="w-4 h-4 text-indigo-600" />
                 <span className="text-slate-700 dark:text-slate-300">{username || '用户'}</span>
-                <button onClick={handleSignOut} className="p-1.5 text-slate-500 hover:text-slate-700 dark:hover:text-slate-200 rounded" title="登出">
+                <button onClick={handleSignOut} className="p-1.5 text-slate-500 hover:text-slate-700 dark:hover:text-slate-200 rounded min-h-[44px] min-w-[44px] flex items-center justify-center" title="登出">
                   <LogOut className="w-4 h-4" />
                 </button>
               </div>
             ) : (
-              <button onClick={()=>setAuthModal(true)} className="px-3 py-1.5 bg-indigo-600 text-white text-sm rounded-lg hover:bg-indigo-700 transition-colors flex items-center gap-1" title="登录">
+              <button onClick={()=>setAuthModal(true)} className="px-3 py-1.5 bg-indigo-600 text-white text-sm rounded-lg hover:bg-indigo-700 transition-colors flex items-center gap-1 min-h-[44px]" title="登录">
                 <LogIn className="w-4 h-4" />
                 <span>登录</span>
               </button>
             )}
-            <button onClick={()=>setDark(!dark)} className="p-2 bg-slate-100 dark:bg-slate-700 rounded-full hover:bg-slate-200 dark:hover:bg-slate-600 transition-colors" title="切换主题">{dark?<Sun className="w-4 h-4"/>:<Moon className="w-4 h-4"/>}</button>
-            <button onClick={()=>setAiSettings(true)} className="p-2 bg-slate-100 dark:bg-slate-700 rounded-full hover:bg-slate-200 dark:hover:bg-slate-600 transition-colors" title="AI设置"><Settings className="w-4 h-4"/></button>
-            <button onClick={()=>setSidebar(true)} className="p-2 bg-slate-100 dark:bg-slate-700 rounded-full relative hover:bg-slate-200 dark:hover:bg-slate-600 transition-colors" title="我的笔记本"><List className="w-4 h-4"/>{(vocab.length+errors.length)>0 && <span className="absolute top-0 right-0 w-2 h-2 bg-red-500 rounded-full"></span>}</button>
+            <button onClick={()=>setDark(!dark)} className="p-2 bg-slate-100 dark:bg-slate-700 rounded-full hover:bg-slate-200 dark:hover:bg-slate-600 transition-colors min-h-[44px] min-w-[44px] flex items-center justify-center" title="切换主题">{dark?<Sun className="w-4 h-4"/>:<Moon className="w-4 h-4"/>}</button>
+            <button onClick={()=>setAiSettings(true)} className="p-2 bg-slate-100 dark:bg-slate-700 rounded-full hover:bg-slate-200 dark:hover:bg-slate-600 transition-colors min-h-[44px] min-w-[44px] flex items-center justify-center" title="AI设置"><Settings className="w-4 h-4"/></button>
+            <button onClick={()=>setSidebar(true)} className="p-2 bg-slate-100 dark:bg-slate-700 rounded-full relative hover:bg-slate-200 dark:hover:bg-slate-600 transition-colors min-h-[44px] min-w-[44px] flex items-center justify-center" title="我的笔记本"><List className="w-4 h-4"/>{(vocab.length+errors.length)>0 && <span className="absolute top-0 right-0 w-2 h-2 bg-red-500 rounded-full"></span>}</button>
           </div>
         </nav>
-        <main className="max-w-3xl mx-auto px-4 pt-6 pb-20">
-          <div className="flex justify-between items-center mb-4">
-             <div className="text-sm text-slate-500">当前: {list[idx].year}</div>
-             <button onClick={()=>setHistoryDrawer(true)} className="text-xs bg-indigo-50 dark:bg-indigo-900/30 text-indigo-600 dark:text-indigo-300 px-3 py-1.5 rounded-full flex items-center gap-1"><Clock className="w-3 h-3"/> 历史</button>
+        
+        {/* 底部导航栏 - 乔布斯极简风格 (3个核心入口) */}
+        <nav className="md:hidden fixed bottom-0 left-0 right-0 z-20 glass border-t border-slate-200/50 dark:border-slate-700/50">
+          <div className="flex justify-around items-center h-20 px-6 pb-safe">
+            <button 
+              onClick={() => window.scrollTo({ top: 0, behavior: 'smooth' })}
+              className="flex flex-col items-center justify-center gap-1.5 touch-target text-indigo-600 dark:text-indigo-400 active:scale-95 transition-transform"
+            >
+              <PenTool className="w-6 h-6" />
+              <span className="text-[11px] font-medium">练习</span>
+            </button>
+            <button 
+              onClick={() => setSidebar(true)}
+              className="flex flex-col items-center justify-center gap-1.5 touch-target text-slate-500 dark:text-slate-400 active:scale-95 transition-transform relative"
+            >
+              <BookOpen className="w-6 h-6" />
+              <span className="text-[11px] font-medium">笔记</span>
+              {(vocab.length+errors.length)>0 && (
+                <span className="absolute top-1 right-1 w-2.5 h-2.5 bg-red-500 rounded-full ring-2 ring-white dark:ring-slate-900"></span>
+              )}
+            </button>
+            <button 
+              onClick={() => setAuthModal(user ? false : true) || (user && setProfileSheet(true))}
+              className="flex flex-col items-center justify-center gap-1.5 touch-target text-slate-500 dark:text-slate-400 active:scale-95 transition-transform"
+            >
+              <User className="w-6 h-6" />
+              <span className="text-[11px] font-medium">我的</span>
+            </button>
           </div>
+        </nav>
+        <main className="max-w-3xl mx-auto px-5 pt-6 pb-28 md:pb-8">
+          {/* 移动端顶部操作栏 */}
+          <div className="md:hidden flex justify-between items-center mb-6">
+            <button 
+              onClick={() => setHistoryDrawer(true)} 
+              className="touch-target text-slate-500 active:scale-95 transition-transform"
+            >
+              <Clock className="w-5 h-5" />
+            </button>
+            <span className="text-[13px] text-slate-400 font-medium">{list[idx].year}</span>
+            <button 
+              onClick={() => setAiSettings(true)} 
+              className="touch-target text-slate-500 active:scale-95 transition-transform"
+            >
+              <Settings className="w-5 h-5" />
+            </button>
+          </div>
+          
           <QuestionVisualizer data={list[idx]} />
-          <div className="flex gap-2 overflow-x-auto pb-4 mb-4">
-            {list.map((d,i)=><button key={i} onClick={()=>setIdx(i)} className={`px-4 py-2 rounded-lg text-sm whitespace-nowrap transition-colors ${idx===i?'bg-indigo-600 text-white':'bg-white dark:bg-slate-800 dark:text-slate-300'}`}>{d.year}</button>)}
-            <button onClick={()=>setGenModal(true)} className="px-4 py-2 rounded-lg text-sm whitespace-nowrap bg-amber-50 dark:bg-amber-900/30 text-amber-700 dark:text-amber-400 flex items-center gap-1"><Sparkles className="w-3 h-3"/> AI出题</button>
+          
+          {/* 移动端滑动卡片题目切换 */}
+          <div className="md:hidden mb-8">
+            <SwipeableTopicCards 
+              list={list} 
+              currentIdx={idx} 
+              onSelect={(i) => setIdx(i)}
+              onGenerate={() => setGenModal(true)}
+            />
           </div>
-          <EssayWorkflowManager data={list[idx]} onSaveVocab={(v)=>{if(!vocab.some(x=>x.word===v.word)) saveData([v,...vocab], errors)}} onSaveError={(e)=>{saveData(vocab, [e,...errors])}} onSaveHistory={saveHistory} />
+          
+          {/* 桌面端按钮列表 */}
+          <div className="hidden md:flex gap-2 overflow-x-auto pb-4 mb-6">
+            {list.map((d,i) => (
+              <button 
+                key={i} 
+                onClick={() => setIdx(i)} 
+                className={`px-5 py-3 rounded-2xl text-[15px] whitespace-nowrap transition-all ${
+                  idx === i 
+                    ? 'bg-indigo-600 text-white shadow-lg shadow-indigo-200 dark:shadow-indigo-900/50' 
+                    : 'bg-white dark:bg-slate-800 text-slate-600 dark:text-slate-300 hover:bg-slate-50'
+                }`}
+              >
+                {d.year}
+              </button>
+            ))}
+            <button 
+              onClick={() => setGenModal(true)} 
+              className="px-5 py-3 rounded-2xl text-[15px] whitespace-nowrap bg-amber-50 dark:bg-amber-900/30 text-amber-700 dark:text-amber-400 flex items-center gap-2"
+            >
+              <Sparkles className="w-4 h-4"/> AI出题
+            </button>
+          </div>
+          
+          <EssayWorkflowManager 
+            data={list[idx]} 
+            onSaveVocab={(v) => {if(!vocab.some(x => x.word === v.word)) saveData([v,...vocab], errors)}} 
+            onSaveError={(e) => {saveData(vocab, [e,...errors])}} 
+            onSaveHistory={saveHistory} 
+          />
         </main>
-        {sidebar && <div className="fixed inset-0 bg-black/50 z-30" onClick={()=>setSidebar(false)} />}
+        {/* 侧边栏遮罩层 - 支持从右边缘滑动打开 */}
+        <EdgeSwipeDetector 
+          onSwipeRight={() => setSidebar(true)}
+          enabled={!sidebar}
+        />
+        {sidebar && <div className="fixed inset-0 bg-black/40 z-20 animate-fadeIn" onClick={()=>setSidebar(false)} />}
         <VocabSidebar isOpen={sidebar} toggle={()=>setSidebar(false)} currentTopic={list[idx].title} savedVocab={vocab} savedErrors={errors} onRemoveVocab={(i)=>saveData(vocab.filter((_,x)=>x!==i), errors)} onRemoveError={(i)=>saveData(vocab, errors.filter((_,x)=>x!==i))} onImportData={handleImportData} onExportData={handleExportData} onAddGeneratedVocab={(v)=>{if(!vocab.some(x=>x.word===v.word)) saveData([v,...vocab], errors)}} user={user} />
         <TopicGeneratorModal isOpen={genModal} onClose={()=>setGenModal(false)} onGenerate={(t)=>{setList([...list,t]);setIdx(list.length);}} />
         <HistoryDrawer isOpen={historyDrawer} onClose={()=>setHistoryDrawer(false)} history={history[list[idx].id]} topicTitle={list[idx].title} />
@@ -953,6 +1841,83 @@ const App = () => {
           db={lc ? {} : null}
           onLoginSuccess={handleLoginSuccess}
         />
+        
+        {/* 我的 - 底部弹出面板 (乔布斯风格) */}
+        {profileSheet && (
+          <>
+            <div className="md:hidden fixed inset-0 bg-black/40 z-40 animate-fadeIn" onClick={() => setProfileSheet(false)} />
+            <div className="md:hidden fixed bottom-0 left-0 right-0 z-50 bg-white dark:bg-slate-900 rounded-t-3xl animate-slideUp">
+              <div className="w-12 h-1 bg-slate-300 dark:bg-slate-700 rounded-full mx-auto mt-3 mb-2" />
+              <div className="px-6 py-4">
+                {/* 用户信息 */}
+                <div className="flex items-center gap-4 mb-6">
+                  <div className="w-14 h-14 rounded-full bg-indigo-100 dark:bg-indigo-900/50 flex items-center justify-center">
+                    <User className="w-7 h-7 text-indigo-600 dark:text-indigo-400" />
+                  </div>
+                  <div>
+                    <h3 className="font-semibold text-[17px] text-slate-800 dark:text-slate-100">
+                      {username || '未登录'}
+                    </h3>
+                    <p className="text-[13px] text-slate-400">
+                      {user ? '云端同步已开启' : '点击登录开启云同步'}
+                    </p>
+                  </div>
+                </div>
+                
+                {/* 功能列表 */}
+                <div className="space-y-1">
+                  <button 
+                    onClick={() => { setProfileSheet(false); setHistoryDrawer(true); }}
+                    className="w-full flex items-center gap-4 p-4 rounded-2xl hover:bg-slate-50 dark:hover:bg-slate-800 active:scale-[0.98] transition-all"
+                  >
+                    <Clock className="w-5 h-5 text-slate-500" />
+                    <span className="text-[17px] text-slate-700 dark:text-slate-200">练习历史</span>
+                    <ChevronRight className="w-5 h-5 text-slate-300 ml-auto" />
+                  </button>
+                  
+                  <button 
+                    onClick={() => { setProfileSheet(false); setAiSettings(true); }}
+                    className="w-full flex items-center gap-4 p-4 rounded-2xl hover:bg-slate-50 dark:hover:bg-slate-800 active:scale-[0.98] transition-all"
+                  >
+                    <Settings className="w-5 h-5 text-slate-500" />
+                    <span className="text-[17px] text-slate-700 dark:text-slate-200">AI 设置</span>
+                    <ChevronRight className="w-5 h-5 text-slate-300 ml-auto" />
+                  </button>
+                  
+                  <button 
+                    onClick={() => setDark(!dark)}
+                    className="w-full flex items-center gap-4 p-4 rounded-2xl hover:bg-slate-50 dark:hover:bg-slate-800 active:scale-[0.98] transition-all"
+                  >
+                    {dark ? <Sun className="w-5 h-5 text-slate-500" /> : <Moon className="w-5 h-5 text-slate-500" />}
+                    <span className="text-[17px] text-slate-700 dark:text-slate-200">深色模式</span>
+                    <div className={`ml-auto w-12 h-7 rounded-full transition-colors ${dark ? 'bg-indigo-600' : 'bg-slate-200'} relative`}>
+                      <div className={`absolute top-1 w-5 h-5 bg-white rounded-full shadow transition-transform ${dark ? 'translate-x-6' : 'translate-x-1'}`} />
+                    </div>
+                  </button>
+                </div>
+                
+                {/* 登录/登出按钮 */}
+                <div className="mt-6 pb-safe">
+                  {user ? (
+                    <button 
+                      onClick={() => { handleSignOut(); setProfileSheet(false); }}
+                      className="w-full py-4 text-red-500 rounded-2xl font-medium text-[17px] active:bg-red-50 dark:active:bg-red-900/20 transition-colors"
+                    >
+                      退出登录
+                    </button>
+                  ) : (
+                    <button 
+                      onClick={() => { setProfileSheet(false); setAuthModal(true); }}
+                      className="btn-primary"
+                    >
+                      登录 / 注册
+                    </button>
+                  )}
+                </div>
+              </div>
+            </div>
+          </>
+        )}
       </div>
     </div>
   );

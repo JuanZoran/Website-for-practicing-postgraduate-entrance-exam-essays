@@ -2,3 +2,112 @@
 @tailwind components;
 @tailwind utilities;
 
+/* 乔布斯式设计系统 */
+@layer base {
+  * {
+    -webkit-tap-highlight-color: transparent;
+    touch-action: manipulation;
+  }
+  
+  button, a {
+    touch-action: manipulation;
+  }
+
+  /* 安全区域适配 */
+  :root {
+    --safe-area-bottom: env(safe-area-inset-bottom, 0px);
+  }
+}
+
+@layer components {
+  /* 毛玻璃效果 */
+  .glass {
+    @apply bg-white/80 dark:bg-slate-900/80 backdrop-blur-xl;
+  }
+  
+  /* 呼吸感卡片 */
+  .card-breathe {
+    @apply p-6 rounded-3xl bg-white dark:bg-slate-800 shadow-sm;
+  }
+  
+  /* 大触摸目标 */
+  .touch-target {
+    @apply min-h-[52px] min-w-[52px] flex items-center justify-center;
+  }
+  
+  /* 主按钮 - 苹果风格 */
+  .btn-primary {
+    @apply w-full py-4 bg-indigo-600 text-white rounded-2xl font-semibold text-[17px] 
+           active:scale-[0.98] transition-transform duration-150;
+  }
+  
+  /* 次要按钮 */
+  .btn-secondary {
+    @apply w-full py-4 bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 
+           rounded-2xl font-medium text-[17px] active:scale-[0.98] transition-transform duration-150;
+  }
+  
+  /* 输入框 - 更大的触摸区域 */
+  .input-field {
+    @apply w-full p-4 rounded-2xl bg-slate-50 dark:bg-slate-900 border-0 
+           text-[17px] leading-relaxed placeholder:text-slate-400
+           focus:outline-none focus:ring-2 focus:ring-indigo-500/50;
+  }
+  
+  /* 淡入动画 */
+  .animate-fadeIn {
+    animation: fadeIn 0.4s ease-out;
+  }
+  
+  .animate-slideUp {
+    animation: slideUp 0.5s cubic-bezier(0.16, 1, 0.3, 1);
+  }
+  
+  @keyframes fadeIn {
+    from { opacity: 0; }
+    to { opacity: 1; }
+  }
+  
+  @keyframes slideUp {
+    from { opacity: 0; transform: translateY(20px); }
+    to { opacity: 1; transform: translateY(0); }
+  }
+  
+  /* 底部安全区域 */
+  .pb-safe {
+    padding-bottom: calc(1rem + var(--safe-area-bottom));
+  }
+  
+  /* 词性颜色标签 */
+  .pos-noun {
+    @apply text-blue-600 dark:text-blue-400 bg-blue-50 dark:bg-blue-900/30;
+  }
+  .pos-verb {
+    @apply text-emerald-600 dark:text-emerald-400 bg-emerald-50 dark:bg-emerald-900/30;
+  }
+  .pos-adj {
+    @apply text-purple-600 dark:text-purple-400 bg-purple-50 dark:bg-purple-900/30;
+  }
+  .pos-adv {
+    @apply text-amber-600 dark:text-amber-400 bg-amber-50 dark:bg-amber-900/30;
+  }
+  
+  /* 高亮文本 */
+  .highlight-word {
+    @apply bg-yellow-200 dark:bg-yellow-800/50 text-yellow-800 dark:text-yellow-200 px-0.5 rounded font-medium;
+  }
+  
+  /* 渐变边框卡片 */
+  .card-gradient-border {
+    @apply relative rounded-xl overflow-hidden;
+    background: linear-gradient(white, white) padding-box,
+                linear-gradient(135deg, #6366f1, #8b5cf6, #ec4899) border-box;
+    border: 2px solid transparent;
+  }
+  
+  .dark .card-gradient-border {
+    background: linear-gradient(#1e293b, #1e293b) padding-box,
+                linear-gradient(135deg, #6366f1, #8b5cf6, #ec4899) border-box;
+  }
+}
+

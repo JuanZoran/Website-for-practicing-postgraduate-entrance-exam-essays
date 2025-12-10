@@ -119,15 +119,15 @@ const AuthModal = ({ isOpen, onClose, auth, db, onLoginSuccess }) => {
 
   return (
     <div 
-      className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4" 
+      className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-0 md:p-4" 
       onClick={onClose}
     >
       <div 
-        className="bg-white dark:bg-slate-800 rounded-xl p-6 w-full max-w-md shadow-2xl"
+        className="bg-white dark:bg-slate-800 rounded-t-3xl md:rounded-xl p-6 w-full max-w-md md:max-w-md h-[90vh] md:h-auto shadow-2xl flex flex-col md:flex-col overflow-hidden"
         onClick={(e) => e.stopPropagation()}
       >
         {/* 头部 */}
-        <div className="flex justify-between items-center mb-6">
+        <div className="flex justify-between items-center mb-6 flex-shrink-0">
           <div className="flex items-center gap-2">
             {mode === 'login' ? (
               <LogIn className="w-5 h-5 text-indigo-600 dark:text-indigo-400" />
@@ -140,14 +140,14 @@ const AuthModal = ({ isOpen, onClose, auth, db, onLoginSuccess }) => {
           </div>
           <button 
             onClick={onClose}
-            className="text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 p-1 rounded-full hover:bg-slate-100 dark:hover:bg-slate-700 transition-colors"
+            className="text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 p-2 rounded-full hover:bg-slate-100 dark:hover:bg-slate-700 transition-colors min-h-[44px] min-w-[44px] flex items-center justify-center"
           >
             <X className="w-5 h-5" />
           </button>
         </div>
 
         {/* 表单 */}
-        <form onSubmit={handleSubmit} className="space-y-4">
+        <form onSubmit={handleSubmit} className="flex-1 overflow-y-auto space-y-4">
           {/* 用户名输入 */}
           <div>
             <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-2">
@@ -250,7 +250,7 @@ const AuthModal = ({ isOpen, onClose, auth, db, onLoginSuccess }) => {
           <button
             type="submit"
             disabled={loading}
-            className={`w-full py-2.5 px-4 rounded-lg font-medium transition-all flex items-center justify-center gap-2 ${
+            className={`w-full py-3 px-4 rounded-lg font-medium transition-all flex items-center justify-center gap-2 min-h-[44px] ${
               loading
                 ? 'bg-slate-400 text-white cursor-not-allowed'
                 : 'bg-indigo-600 text-white hover:bg-indigo-700'
@@ -268,7 +268,7 @@ const AuthModal = ({ isOpen, onClose, auth, db, onLoginSuccess }) => {
         </form>
 
         {/* 切换登录/注册 */}
-        <div className="mt-4 text-center text-sm">
+        <div className="mt-4 text-center text-sm flex-shrink-0">
           {mode === 'login' ? (
             <p className="text-slate-600 dark:text-slate-400">
               还没有账号？{' '}

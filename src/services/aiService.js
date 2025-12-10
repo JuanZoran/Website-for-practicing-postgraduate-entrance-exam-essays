@@ -1,9 +1,10 @@
 /**
  * AI服务抽象层
- * 支持多提供商切换: Gemini / DeepSeek / OpenAI
+ * 支持 DeepSeek
  */
 
 const STORAGE_KEY = 'kaoyan_ai_provider';
+const API_KEY_STORAGE_KEY = 'kaoyan_deepseek_api_key';
 const DEFAULT_PROVIDER = 'deepseek';
 
 /**
@@ -11,32 +12,12 @@ const DEFAULT_PROVIDER = 'deepseek';
  */
 export const getProviders = () => [
   {
-    id: 'gemini',
-    name: 'Google Gemini',
-    models: [
-      { id: 'gemini-2.5-flash-preview-09-2025', name: 'Gemini 2.5 Flash' },
-      { id: 'gemini-1.5-pro', name: 'Gemini 1.5 Pro' }
-    ],
-    defaultModel: 'gemini-2.5-flash-preview-09-2025'
-  },
-  {
     id: 'deepseek',
     name: 'DeepSeek',
     models: [
-      { id: 'deepseek-chat', name: 'DeepSeek Chat' },
-      { id: 'deepseek-coder', name: 'DeepSeek Coder' }
+      { id: 'deepseek-chat', name: 'DeepSeek Chat (V3.2)' }
     ],
     defaultModel: 'deepseek-chat'
-  },
-  {
-    id: 'openai',
-    name: 'OpenAI',
-    models: [
-      { id: 'gpt-4o-mini', name: 'GPT-4o Mini' },
-      { id: 'gpt-4o', name: 'GPT-4o' },
-      { id: 'gpt-3.5-turbo', name: 'GPT-3.5 Turbo' }
-    ],
-    defaultModel: 'gpt-4o-mini'
   }
 ];
 
@@ -91,7 +72,30 @@ export const saveProviderConfig = (provider, model) => {
 };
 
 /**
- * 调用AI服务
+ * 获取 DeepSeek API Key
+ */
+export const getApiKey = () => {
+  try {
+    return localStorage.getItem(API_KEY_STORAGE_KEY) || '';
+  } catch (e) {
+    console.warn('Failed to read API key:', e);
+    return '';
+  }
+};
+
+/**
+ * 保存 DeepSeek API Key
+ */
+export const saveApiKey = (apiKey) => {
+  try {
+    localStorage.setItem(API_KEY_STORAGE_KEY, apiKey);
+  } catch (e) {
+    console.error('Failed to save API key:', e);
+  }
+};
+
+/**
+ * 调用AI服务（直接调用 DeepSeek API）
  * @param {string} prompt - 提示词
  * @param {boolean} jsonMode - 是否使用JSON模式
  * @param {string} provider - 提供商ID (可选,默认使用保存的配置)
@@ -101,53 +105,63 @@ export const callAI = async (prompt, jsonMode = false, provider = null) => {
   const currentProvider = provider || getCurrentProvider();
   const currentModel = getCurrentModel();
   
-  // 使用后端API代理
-  // 支持通过环境变量配置 Cloudflare Worker API 地址
-  // 如果设置了 VITE_API_BASE_URL，则使用该地址（Cloudflare Worker）；否则使用相对路径（Vercel API）
-  const apiBaseUrl = import.meta.env.VITE_API_BASE_URL || '';
+  // 从配置中获取 API Key
+  const DEEPSEEK_API_KEY = getApiKey();
+  if (!DEEPSEEK_API_KEY) {
+    const errorMsg = '请先在设置中配置 DeepSeek API Key';
+    if (jsonMode) {
+      return JSON.stringify({
+        error: errorMsg,
+        status: 'error',
+        message: errorMsg
+      });
+    }
+    throw new Error(errorMsg);
+  }
   
-  // 临时 fallback：如果环境变量未设置，使用硬编码的 Cloudflare Worker 地址
-  // TODO: 部署后应该通过环境变量配置，这里作为临时方案
-  const fallbackWorkerUrl = 'https://ai-api.huangzirui030927.workers.dev';
-  const finalApiBaseUrl = apiBaseUrl || fallbackWorkerUrl;
+  const DEEPSEEK_API_URL = 'https://api.deepseek.com/v1/chat/completions';
   
-  // Cloudflare Worker 直接处理根路径，不需要 /api/ai
-  // Vercel API 需要 /api/ai 路径
-  const apiUrl = finalApiBaseUrl;
-  
-  // 调试信息
-  console.log('[AI Service] Environment:', {
-    'VITE_API_BASE_URL (env)': import.meta.env.VITE_API_BASE_URL || '(not set)',
-    'apiBaseUrl (parsed)': apiBaseUrl || '(empty)',
-    'fallbackWorkerUrl': fallbackWorkerUrl,
-    'finalApiBaseUrl': finalApiBaseUrl,
-    'apiUrl (final)': apiUrl
+  // 构建消息
+  const messages = [
+    {
+      role: 'user',
+      content: prompt
+    }
+  ];
+
+  // 如果启用 JSON 模式，添加系统提示
+  if (jsonMode) {
+    messages.unshift({
+      role: 'system',
+      content: 'You are a helpful assistant that responds in valid JSON format only.'
+    });
+  }
+
+  const payload = {
+    model: currentModel,
+    messages: messages,
+    temperature: 0.7,
+    ...(jsonMode && { response_format: { type: 'json_object' } })
+  };
+
+  console.log('[AI Service] Request:', {
+    url: DEEPSEEK_API_URL,
+    model: currentModel,
+    jsonMode: jsonMode
   });
   
   try {
-    const requestBody = {
-      prompt,
-      jsonMode,
-      provider: currentProvider,
-      model: currentModel,
-    };
-    
-    console.log('[AI Service] Request:', {
-      url: apiUrl,
-      method: 'POST',
-      body: requestBody
-    });
-    
     // 创建带超时的 fetch（30秒超时）
     const controller = new AbortController();
     const timeoutId = setTimeout(() => controller.abort(), 30000);
     
-    const response = await fetch(apiUrl, {
+    const response = await fetch(DEEPSEEK_API_URL, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
+        'Authorization': `Bearer ${DEEPSEEK_API_KEY}`
       },
-      body: JSON.stringify(requestBody),
+      body: JSON.stringify(payload),
       signal: controller.signal,
     });
     
@@ -164,56 +178,23 @@ export const callAI = async (prompt, jsonMode = false, provider = null) => {
         errorData = { error: errorText || `HTTP error! status: ${response.status}` };
       }
       console.error('[AI Service] Response error:', errorData);
-      throw new Error(errorData.error || `HTTP error! status: ${response.status}`);
+      
+      // 根据jsonMode返回相应格式的错误
+      const errorMessage = errorData.error?.message || errorData.error || `HTTP error! status: ${response.status}`;
+      if (jsonMode) {
+        return JSON.stringify({
+          error: errorMessage,
+          status: 'error',
+          message: errorMessage
+        });
+      }
+      throw new Error(errorMessage);
     }
 
-    const responseText = await response.text();
-    console.log('[AI Service] Response text:', responseText.substring(0, 200));
+    const data = await response.json();
+    console.log('[AI Service] Response data:', data);
     
-    // 检查响应是否为纯文本错误消息（非JSON格式）
-    if (responseText.includes('请求超时') || responseText.includes('网络错误') || responseText.includes('错误')) {
-      // 如果是错误消息且不是JSON格式，根据jsonMode返回相应格式
-      if (jsonMode) {
-        return JSON.stringify({
-          error: responseText,
-          status: 'error',
-          message: responseText
-        });
-      }
-      return responseText;
-    }
-    
-    let data = {};
-    try {
-      data = JSON.parse(responseText);
-    } catch (e) {
-      console.error('[AI Service] JSON parse error:', e, 'Response:', responseText);
-      // 如果jsonMode为true，返回JSON格式的错误
-      if (jsonMode) {
-        return JSON.stringify({
-          error: '服务器返回了无效的JSON格式',
-          status: 'error',
-          message: '服务器返回了无效的JSON格式',
-          rawResponse: responseText.substring(0, 100)
-        });
-      }
-      throw new Error('服务器返回了无效的JSON格式');
-    }
-    
-    if (data.error) {
-      console.error('[AI Service] API returned error:', data.error);
-      // 如果jsonMode为true，确保返回JSON格式
-      if (jsonMode) {
-        return JSON.stringify({
-          error: data.error,
-          status: 'error',
-          message: data.error
-        });
-      }
-      throw new Error(data.error);
-    }
-
-    const result = data.text || data.content || "AI 暂时无法响应";
+    const result = data.choices?.[0]?.message?.content || "AI 暂时无法响应";
     console.log('[AI Service] Success, result length:', result.length);
     return result;
   } catch (error) {
@@ -229,9 +210,9 @@ export const callAI = async (prompt, jsonMode = false, provider = null) => {
     if (error.name === 'AbortError' || error.message.includes('timeout')) {
       errorMessage = "请求超时，请稍后重试";
     } else if (error.message.includes('Failed to fetch') || error.message.includes('NetworkError')) {
-      errorMessage = "网络错误，请检查连接或 Cloudflare Worker 是否正常运行";
+      errorMessage = "网络错误，请检查网络连接";
     } else if (error.message.includes('401') || error.message.includes('403')) {
-      errorMessage = "API密钥无效，请检查 Cloudflare Worker 配置";
+      errorMessage = "API密钥无效，请检查配置";
     } else if (error.message.includes('429')) {
       errorMessage = "请求过于频繁，请稍后再试";
     } else {
@@ -250,4 +231,3 @@ export const callAI = async (prompt, jsonMode = false, provider = null) => {
     return errorMessage;
   }
 };
-

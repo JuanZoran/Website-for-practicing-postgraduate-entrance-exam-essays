@@ -65,7 +65,7 @@ const SimpleMarkdown = ({ text, className = "" }) => {
 const INITIAL_EXAM_DATA = [
   {
     id: "2010", year: "2010", title: "文化火锅", mode: "Mode A", visualType: "image", description: "火锅里煮着佛像、莎士比亚、功夫等中西文化元素。",
-    defaultImage: "https://placehold.co/800x400/e2e8f0/475569?text=2010+Exam:+Cultural+Hotpot",
+    defaultImage: "/images/exam/2010.jpg",
     slots: [
       { id: "desc", label: "图画描述", question: "描述火锅中的中西元素融合。", templateContext: "Specifically, [INSERT HERE].", placeholder: "例如：火锅里汇聚了莎士比亚和功夫..." },
       { id: "arg1", label: "核心意义", question: "文化融合为何重要？", templateContext: "First and foremost, [INSERT HERE].", placeholder: "例如：促进文明繁荣，取长补短..." },
@@ -75,7 +75,7 @@ const INITIAL_EXAM_DATA = [
   },
   {
     id: "2011", year: "2011", title: "旅途之余", mode: "Mode B", visualType: "image", description: "游客在船上乱扔垃圾，破坏风景。",
-    defaultImage: "https://placehold.co/800x400/e2e8f0/475569?text=2011+Exam:+Littering+Tourists",
+    defaultImage: "/images/exam/2011.jpg",
     slots: [
       { id: "desc", label: "图画描述", question: "描述游客的不文明行为。", templateContext: "Specifically, [INSERT HERE].", placeholder: "例如：游客一边欣赏风景，一边乱扔垃圾..." },
       { id: "harm", label: "危害分析", question: "这种行为有什么后果？", templateContext: "First and foremost, [INSERT HERE].", placeholder: "例如：破坏生态平衡，损害社会公德..." },
@@ -85,7 +85,7 @@ const INITIAL_EXAM_DATA = [
   },
   {
     id: "2012", year: "2012", title: "打翻酒瓶", mode: "Mode A", visualType: "image", description: "瓶子倒了，一人叹息全完了，一人庆幸剩一半。",
-    defaultImage: "https://placehold.co/800x400/e2e8f0/475569?text=2012+Exam:+Optimism",
+    defaultImage: "/images/exam/2012.jpg",
     slots: [
       { id: "desc", label: "图画描述", question: "对比两人的反应。", templateContext: "Specifically, [INSERT HERE].", placeholder: "例如：一人悲观叹息，另一人乐观庆幸..." },
       { id: "arg1", label: "核心论点", question: "为什么乐观很重要？", templateContext: "First and foremost, [INSERT HERE].", placeholder: "例如：乐观是面对逆境的精神支柱..." },
@@ -94,8 +94,28 @@ const INITIAL_EXAM_DATA = [
     templateString: "Unfolding before us is a thought-provoking cartoon. Specifically, {{desc}}. The purpose is to illustrate optimism. First and foremost, {{arg1}}. Accordingly, it is imperative for us to {{action}}."
   },
   {
+    id: "2013", year: "2013", title: "选择", mode: "Mode A", visualType: "image", description: "一群毕业生站在分岔路口，有人选择就业，有人选择考研，有人选择创业。",
+    defaultImage: "/images/exam/2013.jpg",
+    slots: [
+      { id: "desc", label: "图画描述", question: "描述毕业生面临的选择。", templateContext: "Specifically, [INSERT HERE].", placeholder: "例如：毕业生站在人生十字路口，面临多种选择..." },
+      { id: "arg1", label: "核心意义", question: "为什么选择很重要？", templateContext: "First and foremost, [INSERT HERE].", placeholder: "例如：选择决定人生方向，需要理性思考..." },
+      { id: "action", label: "建议", question: "如何做出正确选择？", templateContext: "Accordingly, [INSERT HERE].", placeholder: "例如：结合兴趣和能力，做出适合自己的选择..." }
+    ],
+    templateString: "Unfolding before us is a thought-provoking cartoon showing graduates at a crossroads. Specifically, {{desc}}. The purpose is to illustrate the importance of making choices. First and foremost, {{arg1}}. Accordingly, we should {{action}}."
+  },
+  {
+    id: "2014", year: "2014", title: "相携", mode: "Mode A", visualType: "image", description: "三十年前，年轻的母亲牵着女儿的手；三十年后，女儿牵着年迈的母亲的手。",
+    defaultImage: "/images/exam/2014.jpg",
+    slots: [
+      { id: "desc", label: "图画描述", question: "描述两幅图的对比。", templateContext: "Specifically, [INSERT HERE].", placeholder: "例如：三十年前母亲照顾女儿，三十年后女儿照顾母亲..." },
+      { id: "arg1", label: "核心意义", question: "为什么孝道很重要？", templateContext: "First and foremost, [INSERT HERE].", placeholder: "例如：孝道是中华民族的传统美德..." },
+      { id: "action", label: "建议", question: "如何传承孝道？", templateContext: "Accordingly, [INSERT HERE].", placeholder: "例如：关爱父母，传承美德..." }
+    ],
+    templateString: "Unfolding before us is a touching cartoon showing the cycle of care. Specifically, {{desc}}. The purpose is to illustrate filial piety. First and foremost, {{arg1}}. Accordingly, we should {{action}}."
+  },
+  {
     id: "2015", year: "2015", title: "聚餐玩手机", mode: "Mode B", visualType: "image", description: "聚餐时大家都在玩手机，没人交流。",
-    defaultImage: "https://placehold.co/800x400/e2e8f0/475569?text=2015+Exam:+Phubbing",
+    defaultImage: "/images/exam/2015.jpg",
     slots: [
       { id: "desc", label: "图画描述", question: "描述聚餐时的冷漠场景。", templateContext: "Specifically, [INSERT HERE].", placeholder: "例如：虽然坐在一起，但都在低头看屏幕..." },
       { id: "harm", label: "危害分析", question: "手机沉迷有什么坏处？", templateContext: "First and foremost, [INSERT HERE].", placeholder: "例如：阻碍了面对面的情感交流..." },
@@ -105,13 +125,93 @@ const INITIAL_EXAM_DATA = [
   },
   {
     id: "2016", year: "2016", title: "父子看电视", mode: "Mode A", visualType: "image", description: "父亲边看电视边让儿子学习，儿子也学着看电视。",
-    defaultImage: "https://placehold.co/800x400/e2e8f0/475569?text=2016+Exam:+Role+Model",
+    defaultImage: "/images/exam/2016.png",
     slots: [
       { id: "desc", label: "图画描述", question: "描述父子的行为对比。", templateContext: "Specifically, [INSERT HERE].", placeholder: "例如：父亲在沙发上看电视，却命令儿子去读书..." },
       { id: "arg1", label: "核心论点", question: "为什么榜样很重要？", templateContext: "First and foremost, [INSERT HERE].", placeholder: "例如：身教重于言教..." },
       { id: "action", label: "建议", question: "父母应该怎么做？", templateContext: "Accordingly, [INSERT HERE].", placeholder: "例如：以身作则，言行一致..." }
     ],
     templateString: "Unfolding before us is a thought-provoking cartoon. Specifically, {{desc}}. The purpose is to illustrate the power of role models. First and foremost, {{arg1}}. Accordingly, parents should {{action}}."
+  },
+  {
+    id: "2017", year: "2017", title: "有书与读书", mode: "Mode A", visualType: "image", description: "一个人坐在书堆前，书很多，但他在玩手机。",
+    defaultImage: "/images/exam/2017.jpg",
+    slots: [
+      { id: "desc", label: "图画描述", question: "描述图画中的矛盾。", templateContext: "Specifically, [INSERT HERE].", placeholder: "例如：面前有很多书，却在玩手机..." },
+      { id: "harm", label: "问题分析", question: "这种现象有什么问题？", templateContext: "First and foremost, [INSERT HERE].", placeholder: "例如：拥有书不等于读书，需要实际行动..." },
+      { id: "action", label: "建议", question: "如何培养阅读习惯？", templateContext: "Accordingly, [INSERT HERE].", placeholder: "例如：放下手机，静心阅读..." }
+    ],
+    templateString: "Unfolding before us is a thought-provoking cartoon. Specifically, {{desc}}. The purpose is to illustrate the gap between owning books and reading. First and foremost, {{harm}}. Accordingly, we should {{action}}."
+  },
+  {
+    id: "2018", year: "2018", title: "选课进行时", mode: "Mode A", visualType: "image", description: "一个学生坐在电脑前选课，一边是\"知识新、重创新、有难度\"的课，一边是\"给分高、易通过、作业少\"的课。",
+    defaultImage: "/images/exam/2018.jpg",
+    slots: [
+      { id: "desc", label: "图画描述", question: "描述学生选课时的两难选择。", templateContext: "Specifically, [INSERT HERE].", placeholder: "例如：学生面临两种课程的选择..." },
+      { id: "arg1", label: "核心意义", question: "为什么应该选择有挑战的课程？", templateContext: "First and foremost, [INSERT HERE].", placeholder: "例如：挑战促进成长，知识提升能力..." },
+      { id: "action", label: "建议", question: "如何做出正确选择？", templateContext: "Accordingly, [INSERT HERE].", placeholder: "例如：选择有挑战的课程，追求真正的学习..." }
+    ],
+    templateString: "Unfolding before us is a cartoon about course selection. Specifically, {{desc}}. The purpose is to illustrate the importance of choosing challenging courses. First and foremost, {{arg1}}. Accordingly, we should {{action}}."
+  },
+  {
+    id: "2019", year: "2019", title: "途中", mode: "Mode A", visualType: "image", description: "一个人在路上，前面是\"坚持\"，后面是\"放弃\"，他选择了坚持。",
+    defaultImage: "/images/exam/2019.png",
+    slots: [
+      { id: "desc", label: "图画描述", question: "描述图画中的场景。", templateContext: "Specifically, [INSERT HERE].", placeholder: "例如：一个人在路上，面临坚持和放弃的选择..." },
+      { id: "arg1", label: "核心意义", question: "为什么坚持很重要？", templateContext: "First and foremost, [INSERT HERE].", placeholder: "例如：坚持是成功的关键，放弃意味着失败..." },
+      { id: "action", label: "建议", question: "如何培养坚持的品质？", templateContext: "Accordingly, [INSERT HERE].", placeholder: "例如：设定目标，克服困难，永不放弃..." }
+    ],
+    templateString: "Unfolding before us is a cartoon about persistence. Specifically, {{desc}}. The purpose is to illustrate the value of perseverance. First and foremost, {{arg1}}. Accordingly, we should {{action}}."
+  },
+  {
+    id: "2020", year: "2020", title: "习惯", mode: "Mode A", visualType: "image", description: "一个女孩坐在桌前，桌上有一本书，但她低头看手机。",
+    defaultImage: "/images/exam/2020.png",
+    slots: [
+      { id: "desc", label: "图画描述", question: "描述图画中的场景。", templateContext: "Specifically, [INSERT HERE].", placeholder: "例如：女孩面前有书，却在看手机..." },
+      { id: "harm", label: "问题分析", question: "这种习惯有什么危害？", templateContext: "First and foremost, [INSERT HERE].", placeholder: "例如：手机成瘾影响学习，分散注意力..." },
+      { id: "action", label: "建议", question: "如何改变不良习惯？", templateContext: "Accordingly, [INSERT HERE].", placeholder: "例如：培养良好习惯，合理使用手机..." }
+    ],
+    templateString: "Unfolding before us is a cartoon about habits. Specifically, {{desc}}. The purpose is to illustrate the impact of bad habits. First and foremost, {{harm}}. Accordingly, we should {{action}}."
+  },
+  {
+    id: "2021", year: "2021", title: "自信", mode: "Mode A", visualType: "image", description: "一个演讲者站在台上，台下有很多观众，他自信地演讲。",
+    defaultImage: "/images/exam/2021.png",
+    slots: [
+      { id: "desc", label: "图画描述", question: "描述演讲者的自信表现。", templateContext: "Specifically, [INSERT HERE].", placeholder: "例如：演讲者自信地站在台上，面对观众..." },
+      { id: "arg1", label: "核心意义", question: "为什么自信很重要？", templateContext: "First and foremost, [INSERT HERE].", placeholder: "例如：自信是成功的基础，帮助克服困难..." },
+      { id: "action", label: "建议", question: "如何培养自信？", templateContext: "Accordingly, [INSERT HERE].", placeholder: "例如：充分准备，积极实践，建立自信..." }
+    ],
+    templateString: "Unfolding before us is a cartoon about confidence. Specifically, {{desc}}. The purpose is to illustrate the importance of self-confidence. First and foremost, {{arg1}}. Accordingly, we should {{action}}."
+  },
+  {
+    id: "2022", year: "2022", title: "传统文化", mode: "Mode A", visualType: "image", description: "一个年轻人穿着传统服装，使用现代科技展示传统文化。",
+    defaultImage: "/images/exam/2022.png",
+    slots: [
+      { id: "desc", label: "图画描述", question: "描述传统与现代的结合。", templateContext: "Specifically, [INSERT HERE].", placeholder: "例如：年轻人用现代方式传承传统文化..." },
+      { id: "arg1", label: "核心意义", question: "为什么需要传承传统文化？", templateContext: "First and foremost, [INSERT HERE].", placeholder: "例如：传统文化是民族的根，需要传承和创新..." },
+      { id: "action", label: "建议", question: "如何传承传统文化？", templateContext: "Accordingly, [INSERT HERE].", placeholder: "例如：用现代方式传播，让传统文化焕发新活力..." }
+    ],
+    templateString: "Unfolding before us is a cartoon about traditional culture. Specifically, {{desc}}. The purpose is to illustrate the importance of cultural inheritance. First and foremost, {{arg1}}. Accordingly, we should {{action}}."
+  },
+  {
+    id: "2023", year: "2023", title: "健康", mode: "Mode A", visualType: "image", description: "一个年轻人一边吃垃圾食品，一边运动，形成对比。",
+    defaultImage: "/images/exam/2023.png",
+    slots: [
+      { id: "desc", label: "图画描述", question: "描述图画中的矛盾。", templateContext: "Specifically, [INSERT HERE].", placeholder: "例如：一边吃垃圾食品，一边运动..." },
+      { id: "harm", label: "问题分析", question: "这种生活方式有什么问题？", templateContext: "First and foremost, [INSERT HERE].", placeholder: "例如：不健康的饮食抵消了运动的效果..." },
+      { id: "action", label: "建议", question: "如何保持健康？", templateContext: "Accordingly, [INSERT HERE].", placeholder: "例如：均衡饮食，坚持运动，养成健康习惯..." }
+    ],
+    templateString: "Unfolding before us is a cartoon about health. Specifically, {{desc}}. The purpose is to illustrate the importance of a healthy lifestyle. First and foremost, {{harm}}. Accordingly, we should {{action}}."
+  },
+  {
+    id: "2024", year: "2024", title: "创新", mode: "Mode A", visualType: "image", description: "一个创新者站在传统和创新的交界处，思考如何平衡。",
+    defaultImage: "/images/exam/2024.png",
+    slots: [
+      { id: "desc", label: "图画描述", question: "描述创新者的处境。", templateContext: "Specifically, [INSERT HERE].", placeholder: "例如：创新者站在传统与创新的交界处..." },
+      { id: "arg1", label: "核心意义", question: "为什么创新很重要？", templateContext: "First and foremost, [INSERT HERE].", placeholder: "例如：创新是发展的动力，推动社会进步..." },
+      { id: "action", label: "建议", question: "如何培养创新能力？", templateContext: "Accordingly, [INSERT HERE].", placeholder: "例如：保持好奇心，勇于尝试，不断学习..." }
+    ],
+    templateString: "Unfolding before us is a cartoon about innovation. Specifically, {{desc}}. The purpose is to illustrate the importance of innovation. First and foremost, {{arg1}}. Accordingly, we should {{action}}."
   },
   {
     id: "2025", year: "2025", title: "消费升级", mode: "Mode C", visualType: "table", description: "居民耐用消费品（空调、汽车等）拥有量逐年上升。",
@@ -352,13 +452,15 @@ const QuestionVisualizer = ({ data }) => {
   if (data.visualType === "table") return <div className="mb-6 bg-white dark:bg-slate-800 rounded-lg p-4 border border-slate-200 dark:border-slate-700 text-center text-sm dark:text-slate-300"><TableIcon className="w-6 h-6 mx-auto mb-2 text-indigo-500" />{data.description}</div>;
 
   return (
-    <div className="mb-6 bg-slate-100 dark:bg-slate-900 rounded-lg overflow-hidden border border-slate-200 dark:border-slate-700 relative group h-48 sm:h-64">
-      <img src={imgSrc} alt="Exam" className="w-full h-full object-cover" onError={(e)=>{e.target.src="https://placehold.co/800x400?text=Image+Error"}} />
-      <div className="absolute top-2 right-2 opacity-0 group-hover:opacity-100 transition-opacity">
+    <div className="mb-6 bg-slate-100 dark:bg-slate-900 rounded-lg overflow-hidden border border-slate-200 dark:border-slate-700 relative group">
+      <div className="flex items-center justify-center min-h-[200px] max-h-[600px] p-4">
+        <img src={imgSrc} alt="Exam" className="max-w-full max-h-[600px] object-contain rounded" onError={(e)=>{e.target.src="https://placehold.co/800x400?text=Image+Error"}} />
+      </div>
+      <div className="absolute top-2 right-2 opacity-0 group-hover:opacity-100 transition-opacity z-10">
          <button onClick={() => fileInputRef.current?.click()} className="bg-white/90 dark:bg-slate-800/90 p-1.5 rounded shadow text-xs font-bold flex items-center gap-1 text-slate-700 dark:text-slate-200"><Upload className="w-3 h-3" /> 上传</button>
          <input type="file" ref={fileInputRef} className="hidden" accept="image/*" onChange={handleFileUpload} />
       </div>
-      <div className="absolute bottom-0 inset-x-0 bg-black/60 text-white text-xs p-2 text-center backdrop-blur-sm">{data.description}</div>
+      <div className="bg-black/60 text-white text-xs p-2 text-center backdrop-blur-sm">{data.description}</div>
     </div>
   );
 };

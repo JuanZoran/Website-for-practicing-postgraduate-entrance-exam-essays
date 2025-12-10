@@ -170,16 +170,46 @@ export const callAI = async (prompt, jsonMode = false, provider = null) => {
     const responseText = await response.text();
     console.log('[AI Service] Response text:', responseText.substring(0, 200));
     
+    // 检查响应是否为纯文本错误消息（非JSON格式）
+    if (responseText.includes('请求超时') || responseText.includes('网络错误') || responseText.includes('错误')) {
+      // 如果是错误消息且不是JSON格式，根据jsonMode返回相应格式
+      if (jsonMode) {
+        return JSON.stringify({
+          error: responseText,
+          status: 'error',
+          message: responseText
+        });
+      }
+      return responseText;
+    }
+    
     let data = {};
     try {
       data = JSON.parse(responseText);
     } catch (e) {
       console.error('[AI Service] JSON parse error:', e, 'Response:', responseText);
+      // 如果jsonMode为true，返回JSON格式的错误
+      if (jsonMode) {
+        return JSON.stringify({
+          error: '服务器返回了无效的JSON格式',
+          status: 'error',
+          message: '服务器返回了无效的JSON格式',
+          rawResponse: responseText.substring(0, 100)
+        });
+      }
       throw new Error('服务器返回了无效的JSON格式');
     }
     
     if (data.error) {
       console.error('[AI Service] API returned error:', data.error);
+      // 如果jsonMode为true，确保返回JSON格式
+      if (jsonMode) {
+        return JSON.stringify({
+          error: data.error,
+          status: 'error',
+          message: data.error
+        });
+      }
       throw new Error(data.error);
     }
 
@@ -193,24 +223,31 @@ export const callAI = async (prompt, jsonMode = false, provider = null) => {
       stack: error.stack
     });
     
-    // 友好的错误提示
+    // 根据jsonMode返回相应格式的错误消息
+    let errorMessage = '';
+    
     if (error.name === 'AbortError' || error.message.includes('timeout')) {
-      return "请求超时，请稍后重试";
+      errorMessage = "请求超时，请稍后重试";
+    } else if (error.message.includes('Failed to fetch') || error.message.includes('NetworkError')) {
+      errorMessage = "网络错误，请检查连接或 Cloudflare Worker 是否正常运行";
+    } else if (error.message.includes('401') || error.message.includes('403')) {
+      errorMessage = "API密钥无效，请检查 Cloudflare Worker 配置";
+    } else if (error.message.includes('429')) {
+      errorMessage = "请求过于频繁，请稍后再试";
+    } else {
+      errorMessage = `错误: ${error.message}`;
     }
     
-    if (error.message.includes('Failed to fetch') || error.message.includes('NetworkError')) {
-      return "网络错误，请检查连接或 Cloudflare Worker 是否正常运行";
+    // 如果jsonMode为true，返回JSON格式的错误消息
+    if (jsonMode) {
+      return JSON.stringify({
+        error: errorMessage,
+        status: 'error',
+        message: errorMessage
+      });
     }
     
-    if (error.message.includes('401') || error.message.includes('403')) {
-      return "API密钥无效，请检查 Cloudflare Worker 配置";
-    }
-    
-    if (error.message.includes('429')) {
-      return "请求过于频繁，请稍后再试";
-    }
-    
-    return `错误: ${error.message}`;
+    return errorMessage;
   }
 };
 

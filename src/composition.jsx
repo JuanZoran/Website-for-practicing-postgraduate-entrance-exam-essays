@@ -1,10 +1,17 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { BookOpen, CheckCircle, XCircle, RefreshCw, ChevronRight, PenTool, Layout, List, HelpCircle, Sparkles, Loader, MessageSquare, Image as ImageIcon, Link as LinkIcon, Table as TableIcon, BrainCircuit, X, Bookmark, AlertTriangle, Trash2, Save, ChevronDown, ChevronUp, Quote, ArrowRight, Check, Upload, Cloud, Moon, Sun, Download, FileJson, PlusCircle, Lightbulb, Clock, History, Copy, LogIn, Wifi, WifiOff, User, Settings } from 'lucide-react';
+import { BookOpen, CheckCircle, XCircle, RefreshCw, ChevronRight, PenTool, Layout, List, HelpCircle, Sparkles, Loader, MessageSquare, Image as ImageIcon, Link as LinkIcon, Table as TableIcon, BrainCircuit, X, Bookmark, AlertTriangle, Trash2, Save, ChevronDown, ChevronUp, Quote, ArrowRight, Check, Upload, Cloud, Moon, Sun, Download, FileJson, PlusCircle, Lightbulb, Clock, History, Copy, LogIn, Wifi, WifiOff, User, Settings, LogOut } from 'lucide-react';
 import { initializeApp } from "firebase/app";
-import { getAuth, signInAnonymously, onAuthStateChanged, signInWithCustomToken } from "firebase/auth";
-import { getFirestore, doc, setDoc, onSnapshot } from "firebase/firestore";
+import { getAuth, signInAnonymously, onAuthStateChanged } from "firebase/auth";
+import { getFirestore, doc, setDoc, onSnapshot, getDoc } from "firebase/firestore";
 import { callAI } from "./services/aiService";
 import AISettings from "./components/AISettings";
+import AuthModal from "./components/AuthModal";
+import { 
+  signOutUser, 
+  getCurrentUsername, 
+  migrateAnonymousData,
+  onAuthStateChange as onAuthStateChangeService
+} from "./services/authService";
 
 // --- FIREBASE INIT (SAFE MODE) ---
 let auth, db, appId;
@@ -530,12 +537,17 @@ const App = () => {
   const [genModal, setGenModal] = useState(false);
   const [historyDrawer, setHistoryDrawer] = useState(false);
   const [aiSettings, setAiSettings] = useState(false);
+  const [authModal, setAuthModal] = useState(false);
   const [user, setUser] = useState(null);
+  const [username, setUsername] = useState(null);
   const [vocab, setVocab] = useState([]);
   const [errors, setErrors] = useState([]);
   const [history, setHistory] = useState({});
   const [dark, setDark] = useState(false);
+  const [isAnonymous, setIsAnonymous] = useState(false);
+  const [migrating, setMigrating] = useState(false);
 
+  // 初始化：加载本地数据和主题
   useEffect(() => {
     if (window.matchMedia('(prefers-color-scheme: dark)').matches) setDark(true);
     // Local fallback init
@@ -543,44 +555,198 @@ const App = () => {
     const localErrors = JSON.parse(localStorage.getItem('kaoyan_errors') || '[]');
     setVocab(localVocab);
     setErrors(localErrors);
-
-    if(auth && !auth.currentUser) signInAnonymously(auth).then(c=>setUser(c.user)).catch(e=>console.warn(e));
-    else if(auth) setUser(auth.currentUser);
   }, []);
 
+  // 监听认证状态变化
   useEffect(() => {
-    if (!user || !db) return;
+    if (!auth) return;
+
+    const unsubscribe = onAuthStateChangeService(auth, async (firebaseUser) => {
+      if (firebaseUser) {
+        setUser(firebaseUser);
+        // 检查是否为匿名用户
+        const isAnon = firebaseUser.isAnonymous;
+        setIsAnonymous(isAnon);
+
+        // 如果是正式用户，获取用户名
+        if (!isAnon && db) {
+          const currentUsername = await getCurrentUsername(db, firebaseUser.uid);
+          setUsername(currentUsername);
+        } else {
+          setUsername(null);
+        }
+      } else {
+        setUser(null);
+        setUsername(null);
+        setIsAnonymous(false);
+      }
+    });
+
+    return () => unsubscribe();
+  }, [auth, db]);
+
+  // 如果没有登录，尝试匿名登录
+  useEffect(() => {
+    if (auth && !auth.currentUser) {
+      signInAnonymously(auth)
+        .then(c => {
+          setUser(c.user);
+          setIsAnonymous(true);
+        })
+        .catch(e => console.warn("匿名登录失败:", e));
+    }
+  }, [auth]);
+
+  // 加载用户数据（正式用户从Firestore，匿名用户从localStorage）
+  useEffect(() => {
+    if (!user || !db) {
+      // 如果没有用户或数据库，使用本地数据
+      const localVocab = JSON.parse(localStorage.getItem('kaoyan_vocab') || '[]');
+      const localErrors = JSON.parse(localStorage.getItem('kaoyan_errors') || '[]');
+      const localHistory = JSON.parse(localStorage.getItem('kaoyan_history') || '{}');
+      setVocab(localVocab);
+      setErrors(localErrors);
+      setHistory(localHistory);
+      return;
+    }
+
+    // 匿名用户：只使用本地数据，不同步到Firestore
+    if (isAnonymous) {
+      const localVocab = JSON.parse(localStorage.getItem('kaoyan_vocab') || '[]');
+      const localErrors = JSON.parse(localStorage.getItem('kaoyan_errors') || '[]');
+      const localHistory = JSON.parse(localStorage.getItem('kaoyan_history') || '{}');
+      setVocab(localVocab);
+      setErrors(localErrors);
+      setHistory(localHistory);
+      return;
+    }
+
+    // 正式用户：从Firestore加载数据
     const notebookRef = doc(db, 'artifacts', appId, 'users', user.uid, 'userData', 'notebook');
     const historyRef = doc(db, 'artifacts', appId, 'users', user.uid, 'userData', 'history');
 
     const unsubNotebook = onSnapshot(notebookRef, (d) => {
       if(d.exists()) {
         const data = d.data();
-        setVocab(data.vocab||[]); 
-        setErrors(data.errors||[]);
-        localStorage.setItem('kaoyan_vocab', JSON.stringify(data.vocab||[]));
-        localStorage.setItem('kaoyan_errors', JSON.stringify(data.errors||[]));
+        const cloudVocab = data.vocab || [];
+        const cloudErrors = data.errors || [];
+        setVocab(cloudVocab); 
+        setErrors(cloudErrors);
+        localStorage.setItem('kaoyan_vocab', JSON.stringify(cloudVocab));
+        localStorage.setItem('kaoyan_errors', JSON.stringify(cloudErrors));
+      } else {
+        // Firestore没有数据，检查localStorage是否有数据需要上传
+        const localVocab = JSON.parse(localStorage.getItem('kaoyan_vocab') || '[]');
+        const localErrors = JSON.parse(localStorage.getItem('kaoyan_errors') || '[]');
+        if (localVocab.length > 0 || localErrors.length > 0) {
+          // 上传本地数据到Firestore
+          setDoc(notebookRef, { vocab: localVocab, errors: localErrors }).catch(err => 
+            console.warn("上传本地数据失败:", err)
+          );
+        }
       }
     }, (e) => console.warn("Firestore access error (likely offline):", e));
     
     const unsubHistory = onSnapshot(historyRef, (d) => {
-      if(d.exists()) setHistory(d.data().records || {});
+      if(d.exists()) {
+        const cloudHistory = d.data().records || {};
+        setHistory(cloudHistory);
+        localStorage.setItem('kaoyan_history', JSON.stringify(cloudHistory));
+      } else {
+        // Firestore没有历史，检查localStorage
+        const localHistory = JSON.parse(localStorage.getItem('kaoyan_history') || '{}');
+        if (Object.keys(localHistory).length > 0) {
+          setDoc(historyRef, { records: localHistory }).catch(err => 
+            console.warn("上传历史数据失败:", err)
+          );
+        }
+      }
     }, (e) => console.warn("Firestore history error:", e));
 
     return () => { unsubNotebook(); unsubHistory(); };
-  }, [user]);
+  }, [user, isAnonymous, db]);
 
   const saveData = (v, e) => {
     setVocab(v); setErrors(e);
     localStorage.setItem('kaoyan_vocab', JSON.stringify(v));
     localStorage.setItem('kaoyan_errors', JSON.stringify(e));
-    if(user && db) setDoc(doc(db, 'artifacts', appId, 'users', user.uid, 'userData', 'notebook'), {vocab: v, errors: e}).catch(err => console.warn("Cloud save failed:", err));
+    // 只有正式用户才同步到Firestore
+    if(user && db && !isAnonymous) {
+      setDoc(doc(db, 'artifacts', appId, 'users', user.uid, 'userData', 'notebook'), {vocab: v, errors: e}).catch(err => console.warn("Cloud save failed:", err));
+    }
   };
 
   const saveHistory = (topicId, record) => {
     const newHistory = { ...history, [topicId]: [...(history[topicId] || []), record] };
     setHistory(newHistory);
-    if(user && db) setDoc(doc(db, 'artifacts', appId, 'users', user.uid, 'userData', 'history'), { records: newHistory }).catch(err => console.warn("History save failed:", err));
+    localStorage.setItem('kaoyan_history', JSON.stringify(newHistory));
+    // 只有正式用户才同步到Firestore
+    if(user && db && !isAnonymous) {
+      setDoc(doc(db, 'artifacts', appId, 'users', user.uid, 'userData', 'history'), { records: newHistory }).catch(err => console.warn("History save failed:", err));
+    }
+  };
+
+  // 处理登录成功
+  const handleLoginSuccess = async (newUser) => {
+    if (!newUser || !db) return;
+
+    // 检查是否有匿名数据需要迁移
+    const localVocab = JSON.parse(localStorage.getItem('kaoyan_vocab') || '[]');
+    const localErrors = JSON.parse(localStorage.getItem('kaoyan_errors') || '[]');
+    const localHistory = JSON.parse(localStorage.getItem('kaoyan_history') || '{}');
+
+    const hasLocalData = localVocab.length > 0 || localErrors.length > 0 || Object.keys(localHistory).length > 0;
+
+    if (hasLocalData && isAnonymous) {
+      // 迁移匿名数据
+      setMigrating(true);
+      try {
+        const anonymousData = {
+          vocab: localVocab,
+          errors: localErrors,
+          history: localHistory
+        };
+        const result = await migrateAnonymousData(db, appId, newUser.uid, anonymousData);
+        if (result.success) {
+          // 迁移成功，清除本地数据（数据已在云端）
+          localStorage.removeItem('kaoyan_vocab');
+          localStorage.removeItem('kaoyan_errors');
+          localStorage.removeItem('kaoyan_history');
+        } else {
+          console.warn("数据迁移失败:", result.error);
+        }
+      } catch (error) {
+        console.error("数据迁移错误:", error);
+      } finally {
+        setMigrating(false);
+      }
+    }
+
+    // 获取用户名
+    const currentUsername = await getCurrentUsername(db, newUser.uid);
+    setUsername(currentUsername);
+    setIsAnonymous(false);
+  };
+
+  // 处理登出
+  const handleSignOut = async () => {
+    try {
+      await signOutUser(auth);
+      setUser(null);
+      setUsername(null);
+      setIsAnonymous(false);
+      // 登出后尝试匿名登录
+      if (auth) {
+        signInAnonymously(auth)
+          .then(c => {
+            setUser(c.user);
+            setIsAnonymous(true);
+          })
+          .catch(e => console.warn("匿名登录失败:", e));
+      }
+    } catch (error) {
+      console.error("登出失败:", error);
+    }
   };
 
   const handleExportData = () => {
@@ -615,7 +781,27 @@ const App = () => {
       <div className="min-h-screen bg-slate-50 dark:bg-slate-900 text-slate-900 dark:text-slate-100 transition-colors">
         <nav className="sticky top-0 z-20 bg-white dark:bg-slate-800 border-b border-slate-200 dark:border-slate-700 px-4 h-14 flex items-center justify-between">
           <div className="font-bold flex gap-2 items-center"><PenTool className="w-5 h-5 text-indigo-600"/> Kaoyan<span className="text-indigo-600">Master</span></div>
-          <div className="flex gap-2">
+          <div className="flex gap-2 items-center">
+            {migrating && (
+              <div className="text-xs text-indigo-600 dark:text-indigo-400 flex items-center gap-1 px-2">
+                <Loader className="w-3 h-3 animate-spin" />
+                <span>数据迁移中...</span>
+              </div>
+            )}
+            {username ? (
+              <div className="flex items-center gap-2 px-2 text-sm">
+                <User className="w-4 h-4 text-indigo-600" />
+                <span className="text-slate-700 dark:text-slate-300">{username}</span>
+                <button onClick={handleSignOut} className="p-1.5 text-slate-500 hover:text-slate-700 dark:hover:text-slate-200 rounded" title="登出">
+                  <LogOut className="w-4 h-4" />
+                </button>
+              </div>
+            ) : (
+              <button onClick={()=>setAuthModal(true)} className="px-3 py-1.5 bg-indigo-600 text-white text-sm rounded-lg hover:bg-indigo-700 transition-colors flex items-center gap-1" title="登录">
+                <LogIn className="w-4 h-4" />
+                <span>登录</span>
+              </button>
+            )}
             <button onClick={()=>setDark(!dark)} className="p-2 bg-slate-100 dark:bg-slate-700 rounded-full hover:bg-slate-200 dark:hover:bg-slate-600 transition-colors" title="切换主题">{dark?<Sun className="w-4 h-4"/>:<Moon className="w-4 h-4"/>}</button>
             <button onClick={()=>setAiSettings(true)} className="p-2 bg-slate-100 dark:bg-slate-700 rounded-full hover:bg-slate-200 dark:hover:bg-slate-600 transition-colors" title="AI设置"><Settings className="w-4 h-4"/></button>
             <button onClick={()=>setSidebar(true)} className="p-2 bg-slate-100 dark:bg-slate-700 rounded-full relative hover:bg-slate-200 dark:hover:bg-slate-600 transition-colors" title="我的笔记本"><List className="w-4 h-4"/>{(vocab.length+errors.length)>0 && <span className="absolute top-0 right-0 w-2 h-2 bg-red-500 rounded-full"></span>}</button>
@@ -638,6 +824,13 @@ const App = () => {
         <TopicGeneratorModal isOpen={genModal} onClose={()=>setGenModal(false)} onGenerate={(t)=>{setList([...list,t]);setIdx(list.length);}} />
         <HistoryDrawer isOpen={historyDrawer} onClose={()=>setHistoryDrawer(false)} history={history[list[idx].id]} topicTitle={list[idx].title} />
         <AISettings isOpen={aiSettings} onClose={()=>setAiSettings(false)} />
+        <AuthModal 
+          isOpen={authModal} 
+          onClose={()=>setAuthModal(false)} 
+          auth={auth}
+          db={db}
+          onLoginSuccess={handleLoginSuccess}
+        />
       </div>
     </div>
   );

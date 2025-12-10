@@ -1,0 +1,190 @@
+/**
+ * Vercel Serverless Function - AI API 代理
+ * 支持 Gemini / DeepSeek / OpenAI
+ */
+
+export default async function handler(req, res) {
+  // 只允许 POST 请求
+  if (req.method !== 'POST') {
+    return res.status(405).json({ error: 'Method not allowed' });
+  }
+
+  // 设置 CORS 头
+  res.setHeader('Access-Control-Allow-Origin', '*');
+  res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS');
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
+
+  // 处理 OPTIONS 预检请求
+  if (req.method === 'OPTIONS') {
+    return res.status(200).end();
+  }
+
+  try {
+    const { prompt, jsonMode = false, provider = 'gemini', model } = req.body;
+
+    if (!prompt) {
+      return res.status(400).json({ error: 'Prompt is required' });
+    }
+
+    let result;
+
+    switch (provider) {
+      case 'gemini':
+        result = await callGemini(prompt, jsonMode, model);
+        break;
+      case 'deepseek':
+        result = await callDeepSeek(prompt, jsonMode, model);
+        break;
+      case 'openai':
+        result = await callOpenAI(prompt, jsonMode, model);
+        break;
+      default:
+        return res.status(400).json({ error: `Unsupported provider: ${provider}` });
+    }
+
+    return res.status(200).json({ text: result, provider, model });
+  } catch (error) {
+    console.error('AI API Error:', error);
+    return res.status(500).json({ 
+      error: error.message || 'Internal server error',
+      details: process.env.NODE_ENV === 'development' ? error.stack : undefined
+    });
+  }
+}
+
+/**
+ * 调用 Gemini API
+ */
+async function callGemini(prompt, jsonMode = false, model = 'gemini-2.5-flash-preview-09-2025') {
+  const apiKey = process.env.GEMINI_API_KEY;
+  
+  if (!apiKey) {
+    throw new Error('GEMINI_API_KEY is not configured');
+  }
+
+  const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`;
+  
+  const payload = {
+    contents: [{ parts: [{ text: prompt }] }],
+    generationConfig: jsonMode ? { responseMimeType: "application/json" } : {}
+  };
+
+  const response = await fetch(url, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload)
+  });
+
+  if (!response.ok) {
+    const errorData = await response.json().catch(() => ({}));
+    throw new Error(`Gemini API error: ${response.status} - ${errorData.error?.message || response.statusText}`);
+  }
+
+  const data = await response.json();
+  return data.candidates?.[0]?.content?.parts?.[0]?.text || "AI 暂时无法响应";
+}
+
+/**
+ * 调用 DeepSeek API
+ */
+async function callDeepSeek(prompt, jsonMode = false, model = 'deepseek-chat') {
+  const apiKey = process.env.DEEPSEEK_API_KEY;
+  
+  if (!apiKey) {
+    throw new Error('DEEPSEEK_API_KEY is not configured');
+  }
+
+  const url = 'https://api.deepseek.com/v1/chat/completions';
+  
+  const messages = [
+    {
+      role: 'user',
+      content: prompt
+    }
+  ];
+
+  // 如果启用 JSON 模式，添加系统提示
+  if (jsonMode) {
+    messages.unshift({
+      role: 'system',
+      content: 'You are a helpful assistant that responds in valid JSON format only.'
+    });
+  }
+
+  const payload = {
+    model: model,
+    messages: messages,
+    temperature: 0.7,
+    ...(jsonMode && { response_format: { type: 'json_object' } })
+  };
+
+  const response = await fetch(url, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'Authorization': `Bearer ${apiKey}`
+    },
+    body: JSON.stringify(payload)
+  });
+
+  if (!response.ok) {
+    const errorData = await response.json().catch(() => ({}));
+    throw new Error(`DeepSeek API error: ${response.status} - ${errorData.error?.message || response.statusText}`);
+  }
+
+  const data = await response.json();
+  return data.choices?.[0]?.message?.content || "AI 暂时无法响应";
+}
+
+/**
+ * 调用 OpenAI API
+ */
+async function callOpenAI(prompt, jsonMode = false, model = 'gpt-4o-mini') {
+  const apiKey = process.env.OPENAI_API_KEY;
+  
+  if (!apiKey) {
+    throw new Error('OPENAI_API_KEY is not configured');
+  }
+
+  const url = 'https://api.openai.com/v1/chat/completions';
+  
+  const messages = [
+    {
+      role: 'user',
+      content: prompt
+    }
+  ];
+
+  // 如果启用 JSON 模式，添加系统提示
+  if (jsonMode) {
+    messages.unshift({
+      role: 'system',
+      content: 'You are a helpful assistant that responds in valid JSON format only.'
+    });
+  }
+
+  const payload = {
+    model: model,
+    messages: messages,
+    temperature: 0.7,
+    ...(jsonMode && { response_format: { type: 'json_object' } })
+  };
+
+  const response = await fetch(url, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'Authorization': `Bearer ${apiKey}`
+    },
+    body: JSON.stringify(payload)
+  });
+
+  if (!response.ok) {
+    const errorData = await response.json().catch(() => ({}));
+    throw new Error(`OpenAI API error: ${response.status} - ${errorData.error?.message || response.statusText}`);
+  }
+
+  const data = await response.json();
+  return data.choices?.[0]?.message?.content || "AI 暂时无法响应";
+}
+

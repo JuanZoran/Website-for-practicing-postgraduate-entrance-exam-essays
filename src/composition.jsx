@@ -1,8 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { BookOpen, CheckCircle, XCircle, RefreshCw, ChevronRight, PenTool, Layout, List, HelpCircle, Sparkles, Loader, MessageSquare, Image as ImageIcon, Link as LinkIcon, Table as TableIcon, BrainCircuit, X, Bookmark, AlertTriangle, Trash2, Save, ChevronDown, ChevronUp, Quote, ArrowRight, Check, Upload, Cloud, Moon, Sun, Download, FileJson, PlusCircle, Lightbulb, Clock, History, Copy, LogIn, Wifi, WifiOff, User, Settings, LogOut } from 'lucide-react';
-import { initializeApp } from "firebase/app";
-import { getAuth, signInAnonymously, onAuthStateChanged } from "firebase/auth";
-import { getFirestore, doc, setDoc, onSnapshot, getDoc } from "firebase/firestore";
 import { callAI } from "./services/aiService";
 import AISettings from "./components/AISettings";
 import AuthModal from "./components/AuthModal";
@@ -12,19 +9,29 @@ import {
   migrateAnonymousData,
   onAuthStateChange as onAuthStateChangeService
 } from "./services/authService";
+import { 
+  initLeanCloud, 
+  getCurrentUser as getLCUser,
+  saveUserData,
+  getUserData,
+  subscribeUserData
+} from "./services/leancloudService";
 
-// --- FIREBASE INIT (SAFE MODE) ---
-let auth, db, appId;
+// --- LEANCLOUD INIT (SAFE MODE) ---
+let lc, appId;
 try {
-  const firebaseConfig = JSON.parse(__firebase_config);
-  const app = initializeApp(firebaseConfig);
-  auth = getAuth(app);
-  db = getFirestore(app);
+  const lcConfig = window.__leancloud_config;
+  if (lcConfig && lcConfig.appId && lcConfig.appKey) {
+    initLeanCloud(lcConfig.appId, lcConfig.appKey, lcConfig.serverURL);
+    lc = true;
+  } else {
+    console.warn("LeanCloud 配置不完整，使用离线模式");
+    lc = false;
+  }
   appId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
 } catch (e) {
-  console.warn("Firebase init failed/skipped (Offline mode active):", e);
-  auth = null;
-  db = null; 
+  console.warn("LeanCloud init failed/skipped (Offline mode active):", e);
+  lc = false;
 }
 
 // --- UTILS ---
@@ -559,22 +566,17 @@ const App = () => {
 
   // 监听认证状态变化
   useEffect(() => {
-    if (!auth) return;
+    if (!lc) return;
 
-    const unsubscribe = onAuthStateChangeService(auth, async (firebaseUser) => {
-      if (firebaseUser) {
-        setUser(firebaseUser);
-        // 检查是否为匿名用户
-        const isAnon = firebaseUser.isAnonymous;
-        setIsAnonymous(isAnon);
+    const unsubscribe = onAuthStateChangeService(null, async (lcUser) => {
+      if (lcUser) {
+        setUser(lcUser);
+        // LeanCloud 不支持匿名用户，所以始终为 false
+        setIsAnonymous(false);
 
-        // 如果是正式用户，获取用户名
-        if (!isAnon && db) {
-          const currentUsername = await getCurrentUsername(db, firebaseUser.uid);
-          setUsername(currentUsername);
-        } else {
-          setUsername(null);
-        }
+        // 获取用户名
+        const currentUsername = await getCurrentUsername(null, lcUser.uid);
+        setUsername(currentUsername);
       } else {
         setUser(null);
         setUsername(null);
@@ -583,24 +585,12 @@ const App = () => {
     });
 
     return () => unsubscribe();
-  }, [auth, db]);
+  }, [lc]);
 
-  // 如果没有登录，尝试匿名登录
+  // 加载用户数据（正式用户从LeanCloud，匿名用户从localStorage）
   useEffect(() => {
-    if (auth && !auth.currentUser) {
-      signInAnonymously(auth)
-        .then(c => {
-          setUser(c.user);
-          setIsAnonymous(true);
-        })
-        .catch(e => console.warn("匿名登录失败:", e));
-    }
-  }, [auth]);
-
-  // 加载用户数据（正式用户从Firestore，匿名用户从localStorage）
-  useEffect(() => {
-    if (!user || !db) {
-      // 如果没有用户或数据库，使用本地数据
+    if (!user || !lc) {
+      // 如果没有用户或LeanCloud未初始化，使用本地数据
       const localVocab = JSON.parse(localStorage.getItem('kaoyan_vocab') || '[]');
       const localErrors = JSON.parse(localStorage.getItem('kaoyan_errors') || '[]');
       const localHistory = JSON.parse(localStorage.getItem('kaoyan_history') || '{}');
@@ -610,7 +600,7 @@ const App = () => {
       return;
     }
 
-    // 匿名用户：只使用本地数据，不同步到Firestore
+    // 匿名用户：只使用本地数据，不同步到LeanCloud
     if (isAnonymous) {
       const localVocab = JSON.parse(localStorage.getItem('kaoyan_vocab') || '[]');
       const localErrors = JSON.parse(localStorage.getItem('kaoyan_errors') || '[]');
@@ -621,58 +611,96 @@ const App = () => {
       return;
     }
 
-    // 正式用户：从Firestore加载数据
-    const notebookRef = doc(db, 'artifacts', appId, 'users', user.uid, 'userData', 'notebook');
-    const historyRef = doc(db, 'artifacts', appId, 'users', user.uid, 'userData', 'history');
+    // 正式用户：从LeanCloud加载数据
+    const userId = user.uid;
 
-    const unsubNotebook = onSnapshot(notebookRef, (d) => {
-      if(d.exists()) {
-        const data = d.data();
-        const cloudVocab = data.vocab || [];
-        const cloudErrors = data.errors || [];
-        setVocab(cloudVocab); 
-        setErrors(cloudErrors);
-        localStorage.setItem('kaoyan_vocab', JSON.stringify(cloudVocab));
-        localStorage.setItem('kaoyan_errors', JSON.stringify(cloudErrors));
-      } else {
-        // Firestore没有数据，检查localStorage是否有数据需要上传
+    // 加载笔记本数据
+    const loadNotebookData = async () => {
+      try {
+        const notebookData = await getUserData(userId, 'notebook');
+        if (notebookData) {
+          const cloudVocab = notebookData.vocab || [];
+          const cloudErrors = notebookData.errors || [];
+          setVocab(cloudVocab);
+          setErrors(cloudErrors);
+          localStorage.setItem('kaoyan_vocab', JSON.stringify(cloudVocab));
+          localStorage.setItem('kaoyan_errors', JSON.stringify(cloudErrors));
+        } else {
+          // LeanCloud没有数据，检查localStorage是否有数据需要上传
+          const localVocab = JSON.parse(localStorage.getItem('kaoyan_vocab') || '[]');
+          const localErrors = JSON.parse(localStorage.getItem('kaoyan_errors') || '[]');
+          if (localVocab.length > 0 || localErrors.length > 0) {
+            // 上传本地数据到LeanCloud
+            await saveUserData(userId, 'notebook', { vocab: localVocab, errors: localErrors });
+          }
+        }
+      } catch (err) {
+        console.warn("加载笔记本数据失败:", err);
+        // 失败时使用本地数据
         const localVocab = JSON.parse(localStorage.getItem('kaoyan_vocab') || '[]');
         const localErrors = JSON.parse(localStorage.getItem('kaoyan_errors') || '[]');
-        if (localVocab.length > 0 || localErrors.length > 0) {
-          // 上传本地数据到Firestore
-          setDoc(notebookRef, { vocab: localVocab, errors: localErrors }).catch(err => 
-            console.warn("上传本地数据失败:", err)
-          );
-        }
+        setVocab(localVocab);
+        setErrors(localErrors);
       }
-    }, (e) => console.warn("Firestore access error (likely offline):", e));
-    
-    const unsubHistory = onSnapshot(historyRef, (d) => {
-      if(d.exists()) {
-        const cloudHistory = d.data().records || {};
-        setHistory(cloudHistory);
-        localStorage.setItem('kaoyan_history', JSON.stringify(cloudHistory));
-      } else {
-        // Firestore没有历史，检查localStorage
-        const localHistory = JSON.parse(localStorage.getItem('kaoyan_history') || '{}');
-        if (Object.keys(localHistory).length > 0) {
-          setDoc(historyRef, { records: localHistory }).catch(err => 
-            console.warn("上传历史数据失败:", err)
-          );
-        }
-      }
-    }, (e) => console.warn("Firestore history error:", e));
+    };
 
-    return () => { unsubNotebook(); unsubHistory(); };
-  }, [user, isAnonymous, db]);
+    // 加载历史数据
+    const loadHistoryData = async () => {
+      try {
+        const historyData = await getUserData(userId, 'history');
+        if (historyData) {
+          const cloudHistory = historyData.records || {};
+          setHistory(cloudHistory);
+          localStorage.setItem('kaoyan_history', JSON.stringify(cloudHistory));
+        } else {
+          // LeanCloud没有历史，检查localStorage
+          const localHistory = JSON.parse(localStorage.getItem('kaoyan_history') || '{}');
+          if (Object.keys(localHistory).length > 0) {
+            await saveUserData(userId, 'history', { records: localHistory });
+          }
+        }
+      } catch (err) {
+        console.warn("加载历史数据失败:", err);
+        // 失败时使用本地数据
+        const localHistory = JSON.parse(localStorage.getItem('kaoyan_history') || '{}');
+        setHistory(localHistory);
+      }
+    };
+
+    // 立即加载数据
+    loadNotebookData();
+    loadHistoryData();
+
+    // 订阅数据变化（轮询方式）
+    const unsubNotebook = subscribeUserData(userId, 'notebook', (data) => {
+      if (data) {
+        setVocab(data.vocab || []);
+        setErrors(data.errors || []);
+        localStorage.setItem('kaoyan_vocab', JSON.stringify(data.vocab || []));
+        localStorage.setItem('kaoyan_errors', JSON.stringify(data.errors || []));
+      }
+    });
+
+    const unsubHistory = subscribeUserData(userId, 'history', (data) => {
+      if (data) {
+        setHistory(data.records || {});
+        localStorage.setItem('kaoyan_history', JSON.stringify(data.records || {}));
+      }
+    });
+
+    return () => { 
+      unsubNotebook(); 
+      unsubHistory(); 
+    };
+  }, [user, isAnonymous, lc]);
 
   const saveData = (v, e) => {
     setVocab(v); setErrors(e);
     localStorage.setItem('kaoyan_vocab', JSON.stringify(v));
     localStorage.setItem('kaoyan_errors', JSON.stringify(e));
-    // 只有正式用户才同步到Firestore
-    if(user && db && !isAnonymous) {
-      setDoc(doc(db, 'artifacts', appId, 'users', user.uid, 'userData', 'notebook'), {vocab: v, errors: e}).catch(err => console.warn("Cloud save failed:", err));
+    // 只有正式用户才同步到LeanCloud
+    if(user && lc && !isAnonymous) {
+      saveUserData(user.uid, 'notebook', {vocab: v, errors: e}).catch(err => console.warn("Cloud save failed:", err));
     }
   };
 
@@ -680,17 +708,17 @@ const App = () => {
     const newHistory = { ...history, [topicId]: [...(history[topicId] || []), record] };
     setHistory(newHistory);
     localStorage.setItem('kaoyan_history', JSON.stringify(newHistory));
-    // 只有正式用户才同步到Firestore
-    if(user && db && !isAnonymous) {
-      setDoc(doc(db, 'artifacts', appId, 'users', user.uid, 'userData', 'history'), { records: newHistory }).catch(err => console.warn("History save failed:", err));
+    // 只有正式用户才同步到LeanCloud
+    if(user && lc && !isAnonymous) {
+      saveUserData(user.uid, 'history', { records: newHistory }).catch(err => console.warn("History save failed:", err));
     }
   };
 
   // 处理登录成功
   const handleLoginSuccess = async (newUser) => {
-    if (!newUser || !db) return;
+    if (!newUser || !lc) return;
 
-    // 检查是否有匿名数据需要迁移
+    // 检查是否有本地数据需要迁移
     const localVocab = JSON.parse(localStorage.getItem('kaoyan_vocab') || '[]');
     const localErrors = JSON.parse(localStorage.getItem('kaoyan_errors') || '[]');
     const localHistory = JSON.parse(localStorage.getItem('kaoyan_history') || '{}');
@@ -706,7 +734,7 @@ const App = () => {
           errors: localErrors,
           history: localHistory
         };
-        const result = await migrateAnonymousData(db, appId, newUser.uid, anonymousData);
+        const result = await migrateAnonymousData(null, appId, newUser.uid, anonymousData);
         if (result.success) {
           // 迁移成功，清除本地数据（数据已在云端）
           localStorage.removeItem('kaoyan_vocab');
@@ -723,7 +751,7 @@ const App = () => {
     }
 
     // 获取用户名
-    const currentUsername = await getCurrentUsername(db, newUser.uid);
+    const currentUsername = await getCurrentUsername(null, newUser.uid);
     setUsername(currentUsername);
     setIsAnonymous(false);
   };
@@ -731,19 +759,11 @@ const App = () => {
   // 处理登出
   const handleSignOut = async () => {
     try {
-      await signOutUser(auth);
+      await signOutUser(null);
       setUser(null);
       setUsername(null);
       setIsAnonymous(false);
-      // 登出后尝试匿名登录
-      if (auth) {
-        signInAnonymously(auth)
-          .then(c => {
-            setUser(c.user);
-            setIsAnonymous(true);
-          })
-          .catch(e => console.warn("匿名登录失败:", e));
-      }
+      // LeanCloud 不支持匿名登录，登出后用户需要手动登录
     } catch (error) {
       console.error("登出失败:", error);
     }
@@ -788,10 +808,10 @@ const App = () => {
                 <span>数据迁移中...</span>
               </div>
             )}
-            {username ? (
+            {user && !isAnonymous ? (
               <div className="flex items-center gap-2 px-2 text-sm">
                 <User className="w-4 h-4 text-indigo-600" />
-                <span className="text-slate-700 dark:text-slate-300">{username}</span>
+                <span className="text-slate-700 dark:text-slate-300">{username || '用户'}</span>
                 <button onClick={handleSignOut} className="p-1.5 text-slate-500 hover:text-slate-700 dark:hover:text-slate-200 rounded" title="登出">
                   <LogOut className="w-4 h-4" />
                 </button>
@@ -827,8 +847,8 @@ const App = () => {
         <AuthModal 
           isOpen={authModal} 
           onClose={()=>setAuthModal(false)} 
-          auth={auth}
-          db={db}
+          auth={lc ? {} : null}
+          db={lc ? {} : null}
           onLoginSuccess={handleLoginSuccess}
         />
       </div>

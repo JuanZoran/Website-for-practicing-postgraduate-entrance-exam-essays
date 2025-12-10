@@ -125,41 +125,85 @@ export const callAI = async (prompt, jsonMode = false, provider = null) => {
   });
   
   try {
+    const requestBody = {
+      prompt,
+      jsonMode,
+      provider: currentProvider,
+      model: currentModel,
+    };
+    
+    console.log('[AI Service] Request:', {
+      url: apiUrl,
+      method: 'POST',
+      body: requestBody
+    });
+    
+    // 创建带超时的 fetch（30秒超时）
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 30000);
+    
     const response = await fetch(apiUrl, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
       },
-      body: JSON.stringify({
-        prompt,
-        jsonMode,
-        provider: currentProvider,
-        model: currentModel,
-      }),
+      body: JSON.stringify(requestBody),
+      signal: controller.signal,
     });
-
+    
+    clearTimeout(timeoutId);
+    
+    console.log('[AI Service] Response status:', response.status, response.statusText);
+    
     if (!response.ok) {
-      const errorData = await response.json().catch(() => ({}));
+      const errorText = await response.text().catch(() => '');
+      let errorData = {};
+      try {
+        errorData = JSON.parse(errorText);
+      } catch (e) {
+        errorData = { error: errorText || `HTTP error! status: ${response.status}` };
+      }
+      console.error('[AI Service] Response error:', errorData);
       throw new Error(errorData.error || `HTTP error! status: ${response.status}`);
     }
 
-    const data = await response.json();
+    const responseText = await response.text();
+    console.log('[AI Service] Response text:', responseText.substring(0, 200));
+    
+    let data = {};
+    try {
+      data = JSON.parse(responseText);
+    } catch (e) {
+      console.error('[AI Service] JSON parse error:', e, 'Response:', responseText);
+      throw new Error('服务器返回了无效的JSON格式');
+    }
     
     if (data.error) {
+      console.error('[AI Service] API returned error:', data.error);
       throw new Error(data.error);
     }
 
-    return data.text || data.content || "AI 暂时无法响应";
+    const result = data.text || data.content || "AI 暂时无法响应";
+    console.log('[AI Service] Success, result length:', result.length);
+    return result;
   } catch (error) {
-    console.error(`AI API Error (${currentProvider}):`, error);
+    console.error(`[AI Service] Error (${currentProvider}):`, {
+      name: error.name,
+      message: error.message,
+      stack: error.stack
+    });
     
     // 友好的错误提示
+    if (error.name === 'AbortError' || error.message.includes('timeout')) {
+      return "请求超时，请稍后重试";
+    }
+    
     if (error.message.includes('Failed to fetch') || error.message.includes('NetworkError')) {
-      return "网络错误，请检查连接";
+      return "网络错误，请检查连接或 Cloudflare Worker 是否正常运行";
     }
     
     if (error.message.includes('401') || error.message.includes('403')) {
-      return "API密钥无效，请检查配置";
+      return "API密钥无效，请检查 Cloudflare Worker 配置";
     }
     
     if (error.message.includes('429')) {

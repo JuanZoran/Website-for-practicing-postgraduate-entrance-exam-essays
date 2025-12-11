@@ -1,74 +1,66 @@
 const SimpleMarkdown = ({ text, className = "" }) => {
   if (!text) return null;
   
-  // 格式化内联文本，支持更丰富的颜色
+  // 格式化内联文本
   const formatInline = (str) => {
-    const elements = [];
-    let lastIndex = 0;
-    const matches = [];
+    if (!str) return null;
     
-    // 匹配粗体 **text**
-    const boldRegex = /\*\*(.+?)\*\*/g;
-    let match;
-    while ((match = boldRegex.exec(str)) !== null) {
-      matches.push({ start: match.index, end: match.index + match[0].length, content: match[1], type: 'bold' });
+    // 使用更简单的方式：直接用 split 和 map 处理粗体
+    const parts = [];
+    let remaining = str;
+    let keyIndex = 0;
+    
+    // 处理粗体 **text**
+    while (remaining.length > 0) {
+      const boldStart = remaining.indexOf('**');
+      
+      if (boldStart === -1) {
+        // 没有更多粗体标记，添加剩余文本
+        if (remaining) {
+          parts.push({ type: 'text', content: remaining, key: keyIndex++ });
+        }
+        break;
+      }
+      
+      // 添加粗体标记之前的文本
+      if (boldStart > 0) {
+        parts.push({ type: 'text', content: remaining.slice(0, boldStart), key: keyIndex++ });
+      }
+      
+      // 查找结束的 **
+      const afterStart = remaining.slice(boldStart + 2);
+      const boldEnd = afterStart.indexOf('**');
+      
+      if (boldEnd === -1) {
+        // 没有找到结束标记，把剩余的都当作普通文本
+        parts.push({ type: 'text', content: remaining.slice(boldStart), key: keyIndex++ });
+        break;
+      }
+      
+      // 提取粗体内容
+      const boldContent = afterStart.slice(0, boldEnd);
+      if (boldContent) {
+        parts.push({ type: 'bold', content: boldContent, key: keyIndex++ });
+      }
+      
+      // 继续处理剩余文本
+      remaining = afterStart.slice(boldEnd + 2);
     }
     
-    // 匹配引号内容 "text"
-    const quoteRegex = /"([^"]+)"/g;
-    while ((match = quoteRegex.exec(str)) !== null) {
-      const overlaps = matches.some(m => 
-        (match.index >= m.start && match.index < m.end) || 
-        (match.index + match[0].length > m.start && match.index + match[0].length <= m.end)
-      );
-      if (!overlaps) {
-        matches.push({ start: match.index, end: match.index + match[0].length, content: match[1], type: 'quote' });
-      }
-    }
-    
-    // 匹配英文单词/短语（用于高亮关键术语）
-    const termRegex = /\b([A-Z][a-z]+(?:\s+[A-Z][a-z]+)*)\b/g;
-    while ((match = termRegex.exec(str)) !== null) {
-      const overlaps = matches.some(m => 
-        (match.index >= m.start && match.index < m.end) || 
-        (match.index + match[0].length > m.start && match.index + match[0].length <= m.end)
-      );
-      if (!overlaps && match[1].length > 3) {
-        matches.push({ start: match.index, end: match.index + match[0].length, content: match[1], type: 'term' });
-      }
-    }
-    
-    // 按位置排序
-    matches.sort((a, b) => a.start - b.start);
-    
-    // 构建结果
-    matches.forEach((m, idx) => {
-      if (m.start > lastIndex) {
-        elements.push(<span key={`t${idx}`}>{str.slice(lastIndex, m.start)}</span>);
-      }
-      if (m.type === 'bold') {
-        elements.push(
-          <strong key={`b${idx}`} className="font-bold text-indigo-700 dark:text-indigo-300 bg-indigo-50 dark:bg-indigo-900/40 px-1 rounded">
-            {m.content}
+    // 渲染各部分
+    return parts.map(part => {
+      if (part.type === 'bold') {
+        return (
+          <strong 
+            key={part.key} 
+            className="font-bold text-indigo-700 dark:text-indigo-300 bg-indigo-50 dark:bg-indigo-900/40 px-1 rounded"
+          >
+            {part.content}
           </strong>
         );
-      } else if (m.type === 'quote') {
-        elements.push(
-          <span key={`q${idx}`} className="text-emerald-600 dark:text-emerald-400 font-medium">"{m.content}"</span>
-        );
-      } else if (m.type === 'term') {
-        elements.push(
-          <span key={`e${idx}`} className="text-blue-600 dark:text-blue-400 font-medium">{m.content}</span>
-        );
       }
-      lastIndex = m.end;
+      return <span key={part.key}>{part.content}</span>;
     });
-    
-    if (lastIndex < str.length) {
-      elements.push(<span key="last">{str.slice(lastIndex)}</span>);
-    }
-    
-    return elements.length > 0 ? elements : str;
   };
   
   return (
@@ -76,35 +68,52 @@ const SimpleMarkdown = ({ text, className = "" }) => {
       {text.split('\n').map((line, i) => {
         if (!line.trim()) return <div key={i} className="h-2"></div>;
         
-        // 检测列表项
-        const isBullet = /^[-*•]\s/.test(line.trim());
-        const isNumbered = /^\d+[.)]\s/.test(line.trim());
-        const cleanLine = isBullet ? line.trim().substring(2) : 
-                         isNumbered ? line.trim().replace(/^\d+[.)]\s/, '') : line;
+        const trimmedLine = line.trim();
         
-        const formattedContent = formatInline(cleanLine);
+        // 检测标题 (### 或 ## 或 #)
+        if (trimmedLine.startsWith('### ')) {
+          return (
+            <h4 key={i} className="font-semibold text-slate-800 dark:text-slate-200 mt-3 mb-1">
+              {formatInline(trimmedLine.slice(4))}
+            </h4>
+          );
+        }
+        
+        if (trimmedLine.startsWith('## ')) {
+          return (
+            <h3 key={i} className="font-bold text-slate-800 dark:text-slate-200 mt-4 mb-2 text-lg">
+              {formatInline(trimmedLine.slice(3))}
+            </h3>
+          );
+        }
+        
+        // 检测列表项
+        const isBullet = /^[-*•]\s/.test(trimmedLine);
+        const isNumbered = /^\d+[.)]\s/.test(trimmedLine);
         
         if (isBullet) {
+          const content = trimmedLine.replace(/^[-*•]\s/, '');
           return (
             <div key={i} className="flex gap-2 ml-1 leading-relaxed break-words">
               <span className="text-indigo-400 dark:text-indigo-500 mt-0.5 flex-shrink-0">•</span>
-              <div className="flex-1">{formattedContent}</div>
+              <div className="flex-1">{formatInline(content)}</div>
             </div>
           );
         }
         
         if (isNumbered) {
-          const num = line.trim().match(/^\d+/)[0];
+          const num = trimmedLine.match(/^\d+/)[0];
+          const content = trimmedLine.replace(/^\d+[.)]\s/, '');
           return (
             <div key={i} className="flex gap-2 ml-1 leading-relaxed break-words">
               <span className="text-emerald-500 dark:text-emerald-400 font-medium text-sm mt-0.5 flex-shrink-0 min-w-[1.5rem]">{num}.</span>
-              <div className="flex-1">{formattedContent}</div>
+              <div className="flex-1">{formatInline(content)}</div>
             </div>
           );
         }
         
         return (
-          <div key={i} className="leading-relaxed break-words">{formattedContent}</div>
+          <div key={i} className="leading-relaxed break-words">{formatInline(line)}</div>
         );
       })}
     </div>

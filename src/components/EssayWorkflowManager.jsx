@@ -94,15 +94,29 @@ const EssayWorkflowManager = ({ data, onSaveVocab, onSaveError, onSaveHistory })
     }
   };
 
+  // 根据 slot id 获取任务类型描述
+  const getSlotTypeDescription = (slotId) => {
+    const typeMap = {
+      'desc': '图画描述 - 需要准确、生动地描述图画内容',
+      'arg1': '核心意义/论点 - 需要深入分析主题的意义',
+      'harm': '危害分析 - 需要分析问题的负面影响',
+      'action': '建议/行动 - 需要提出可行的解决方案',
+      'reason': '原因分析 - 需要分析现象背后的原因'
+    };
+    return typeMap[slotId] || '思路分析';
+  };
+
   const handleLogic = async (id) => {
     if (!inputs.cn[id]) return;
     setLoading(id);
     setError(null);
     try {
+      const slotInfo = data.slots.find(s => s.id === id);
       const prompt = buildPrompt('logic', {
         topic: data.title,
         description: data.description,
-        userInput: inputs.cn[id]
+        userInput: inputs.cn[id],
+        slotType: `${slotInfo?.label || '思路'} (${getSlotTypeDescription(id)})`
       });
       const res = await callAI(prompt || `Task: Kaoyan Logic Check. Topic: ${data.title}. User Idea: "${inputs.cn[id]}". Output JSON: { "status": "pass/warn", "comment": "Chinese feedback", "suggestion": "Improvement" }`, true);
       const json = JSON.parse(res.replace(/```json|```/g,''));

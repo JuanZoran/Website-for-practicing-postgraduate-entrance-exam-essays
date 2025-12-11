@@ -68,27 +68,54 @@ const DEFAULT_TEMPLATES = {
 - 题目: {{topic}}
 - 题目描述: {{description}}
 
+## 当前任务类型
+{{slotType}}
+
 ## 学生思路
 {{userInput}}
 
-## 评估维度
+## 评估维度（根据任务类型选择合适的维度）
+
+### 如果是"图画描述"类任务：
+1. **完整性**: 是否涵盖图画的主要元素和细节
+2. **准确性**: 描述是否准确反映图画内容
+3. **生动性**: 描述是否形象生动，有画面感
+4. **简洁性**: 是否简明扼要，不冗余
+
+### 如果是"核心意义/论点"类任务：
 1. **切题性**: 思路是否紧扣题目主旨
 2. **逻辑性**: 论证是否有条理、有层次
 3. **深度**: 是否有独到见解或深入分析
 4. **可行性**: 是否便于展开成完整作文
+
+### 如果是"危害分析"类任务：
+1. **针对性**: 是否准确指出问题的危害
+2. **全面性**: 是否从多角度分析危害
+3. **逻辑性**: 因果关系是否清晰
+4. **说服力**: 论述是否有说服力
+
+### 如果是"建议/行动"类任务：
+1. **可行性**: 建议是否切实可行
+2. **针对性**: 是否针对问题提出解决方案
+3. **层次性**: 是否有个人、社会、国家等多层面
+4. **号召力**: 是否有感染力和号召力
 
 ## 输出要求
 请用JSON格式输出:
 {
   "status": "pass/warn/fail",
   "score": 1-10,
-  "comment": "中文点评，指出优点和不足",
+  "comment": "中文点评，根据任务类型给出针对性反馈，指出优点和不足",
   "suggestion": "具体改进建议",
   "keyPoints": ["要点1", "要点2"]
 }`,
     fewShotExamples: [
       {
-        input: '题目：文化火锅\n思路：我想写中西文化融合的好处，比如促进交流、取长补短',
+        input: '题目：文化火锅\n任务类型：图画描述\n思路：火锅里有莎士比亚、功夫、佛像等中西文化元素',
+        output: '{"status":"pass","score":8,"comment":"描述准确，涵盖了图画的主要元素。建议可以更生动地描述这些元素在火锅中融合的画面感。","suggestion":"可以加入动态描述，如各种文化元素在沸腾的火锅中交融","keyPoints":["中西文化元素","火锅象征融合"]}'
+      },
+      {
+        input: '题目：文化火锅\n任务类型：核心意义\n思路：我想写中西文化融合的好处，比如促进交流、取长补短',
         output: '{"status":"pass","score":8,"comment":"思路切题，抓住了文化融合的核心。建议可以加入具体例子，如饮食、节日等方面的融合现象。","suggestion":"可以从个人、社会、国家三个层面展开论述","keyPoints":["文化交流促进理解","取长补短共同发展"]}'
       }
     ]
@@ -362,12 +389,19 @@ export const deleteTemplate = (templateId) => {
 export const buildPrompt = (type, variables = {}) => {
   const activeTemplates = getActiveTemplates();
   const templates = getAllTemplates();
-  const templateId = activeTemplates[type];
-  const template = templates[templateId];
+  let templateId = activeTemplates[type];
+  let template = templates[templateId];
   
+  // 如果找不到激活的模板，尝试使用默认模板
   if (!template) {
-    console.warn(`Template not found: ${templateId}`);
-    return null;
+    console.warn(`Template not found: ${templateId}, falling back to default`);
+    const defaultId = `${type}_default`;
+    template = templates[defaultId] || DEFAULT_TEMPLATES[type];
+    
+    if (!template) {
+      console.error(`No template available for type: ${type}`);
+      return null;
+    }
   }
   
   let prompt = template.template;

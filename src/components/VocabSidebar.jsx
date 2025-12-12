@@ -217,7 +217,7 @@ const VocabSidebar = ({
         </button>
       </div>
 
-      <div className="flex-1 overflow-y-auto p-4 space-y-4">
+      <div className="flex-1 overflow-y-auto p-4 space-y-4 custom-scrollbar">
         {activeTab === 'system' && (
           <div className="animate-fadeIn">
             {/* AI Generator */}
@@ -227,8 +227,9 @@ const VocabSidebar = ({
               
               {!aiVocabList.length && !loading && (
                 <Ripples>
-                  <button onClick={handleExpandVocab} className="w-full bg-indigo-600 text-white text-xs font-bold py-3 rounded shadow-sm hover:bg-indigo-700 transition-colors flex justify-center items-center gap-2 min-h-[44px]">
-                    <Sparkles className="w-3 h-3" /> 生成推荐
+                  <button onClick={handleExpandVocab} className="w-full bg-gradient-to-r from-indigo-600 to-violet-600 text-white text-sm font-bold py-3.5 rounded-xl shadow-md hover:shadow-lg hover:from-indigo-500 hover:to-violet-500 active:scale-[0.98] transition-all flex justify-center items-center gap-2 min-h-[44px] group">
+                    <Sparkles className="w-4 h-4 group-hover:animate-pulse" /> 
+                    <span className="tracking-widest">生成推荐</span>
                   </button>
                 </Ripples>
               )}

@@ -31,3 +31,4 @@ export { default as WritingMaterialLibrary } from './WritingMaterialLibrary';
 
 // 错误处理组件
 export { ErrorToast, InlineError, RetryIndicator, ErrorFallback } from './ErrorDisplay';
+export { default as ErrorBoundary } from './ErrorBoundary';

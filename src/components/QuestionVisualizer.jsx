@@ -15,7 +15,7 @@ const QuestionVisualizer = ({ data }) => {
 
   if (data.visualType === "table") {
     return (
-      <div className="mb-8 card-breathe text-center">
+      <div className="card-breathe text-center h-full flex flex-col justify-center">
         <TableIcon className="w-8 h-8 mx-auto mb-3 text-indigo-500" />
         <p className="text-[15px] text-slate-600 dark:text-slate-300">{data.description}</p>
       </div>
@@ -23,12 +23,12 @@ const QuestionVisualizer = ({ data }) => {
   }
 
   return (
-    <div className="mb-8 rounded-3xl overflow-hidden bg-slate-100 dark:bg-slate-800 relative group">
-      <div className="flex items-center justify-center min-h-[220px] max-h-[400px] p-4">
+    <div className="rounded-3xl overflow-hidden bg-slate-100 dark:bg-slate-800 relative group h-full">
+      <div className="flex items-center justify-center h-full min-h-[220px] p-4">
         <img 
           src={imgSrc} 
           alt="Exam" 
-          className="max-w-full max-h-[380px] object-contain rounded-2xl" 
+          className="max-w-full max-h-[50vh] object-contain rounded-2xl shadow-sm" 
           onError={(e) => {e.target.src="https://placehold.co/800x400?text=Image+Error"}} 
         />
       </div>

@@ -171,8 +171,8 @@ export const onAuthStateChange = (callback) => {
   // 立即检查一次
   checkAuth();
   
-  // 定期检查（每5秒）
-  const interval = setInterval(checkAuth, 5000);
+  // 定期检查（每30秒，降低频率以减少资源消耗）
+  const interval = setInterval(checkAuth, 30000);
   
   // 返回取消函数
   return () => clearInterval(interval);
@@ -358,4 +358,3 @@ const userToJSON = (user) => {
     ...user.toJSON()
   };
 };
-

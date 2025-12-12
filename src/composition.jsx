@@ -26,12 +26,15 @@ import VocabSidebar from "./components/VocabSidebar";
 import QuestionVisualizer from "./components/QuestionVisualizer";
 import TopicGeneratorModal from "./components/TopicGeneratorModal";
 import EssayWorkflowManager from "./components/EssayWorkflowManager";
+import LetterWorkflowManager from "./components/LetterWorkflowManager";
+import WritingModeSwitch from "./components/WritingModeSwitch";
 import PersonalizedLearning from "./components/PersonalizedLearning";
 import AdvancedAnalytics from "./components/AdvancedAnalytics";
 import LearningPathPlanner from "./components/LearningPathPlanner";
 
 // 导入数据
 import { INITIAL_EXAM_DATA } from "./data/examData";
+import { INITIAL_LETTER_DATA } from "./data/letterData";
 
 // --- LEANCLOUD INIT (SAFE MODE) ---
 let lc, appId;
@@ -53,6 +56,9 @@ try {
 const App = () => {
   const [list, setList] = useState(INITIAL_EXAM_DATA);
   const [idx, setIdx] = useState(0);
+  const [letterList, setLetterList] = useState(INITIAL_LETTER_DATA);
+  const [letterIdx, setLetterIdx] = useState(0);
+  const [writingMode, setWritingMode] = useState('essay');
   const [sidebar, setSidebar] = useState(false);
   const [genModal, setGenModal] = useState(false);
   const [historyDrawer, setHistoryDrawer] = useState(false);
@@ -70,6 +76,11 @@ const App = () => {
   const [showLearning, setShowLearning] = useState(false);
   const [showAnalytics, setShowAnalytics] = useState(false);
   const [showPathPlanner, setShowPathPlanner] = useState(false);
+
+  const currentList = writingMode === 'essay' ? list : letterList;
+  const currentIdx = writingMode === 'essay' ? idx : letterIdx;
+  const setCurrentIdx = writingMode === 'essay' ? setIdx : setLetterIdx;
+  const currentData = currentList[currentIdx];
 
   // 初始化：加载本地数据和主题
   useEffect(() => {
@@ -360,7 +371,7 @@ const App = () => {
             >
               <Clock className="w-5 h-5" />
             </button>
-            <span className="text-[13px] text-slate-400 font-medium">{list[idx].year}</span>
+            <span className="text-[13px] text-slate-400 font-medium">{currentData?.year}</span>
             <button 
               onClick={() => setAiSettings(true)} 
               className="touch-target text-slate-500 active:scale-95 transition-transform"
@@ -368,48 +379,63 @@ const App = () => {
               <Settings className="w-5 h-5" />
             </button>
           </div>
-          
-          <QuestionVisualizer data={list[idx]} />
+
+          <WritingModeSwitch mode={writingMode} onModeChange={setWritingMode} />
+
+          {writingMode === 'essay' && <QuestionVisualizer data={currentData} />}
           
           {/* 移动端滑动卡片题目切换 */}
           <div className="md:hidden mb-8">
             <SwipeableTopicCards 
-              list={list} 
-              currentIdx={idx} 
-              onSelect={(i) => setIdx(i)}
-              onGenerate={() => setGenModal(true)}
+              list={currentList} 
+              currentIdx={currentIdx} 
+              onSelect={(i) => setCurrentIdx(i)}
+              onGenerate={writingMode === 'essay' ? () => setGenModal(true) : null}
             />
           </div>
           
           {/* 桌面端按钮列表 */}
           <div className="hidden md:flex gap-2 overflow-x-auto pb-4 mb-6">
-            {list.map((d,i) => (
+            {currentList.map((d,i) => (
               <button 
                 key={i} 
-                onClick={() => setIdx(i)} 
+                onClick={() => setCurrentIdx(i)} 
                 className={`px-5 py-3 rounded-2xl text-[15px] whitespace-nowrap transition-all ${
-                  idx === i 
-                    ? 'bg-indigo-600 text-white shadow-lg shadow-indigo-200 dark:shadow-indigo-900/50' 
+                  currentIdx === i 
+                    ? writingMode === 'essay'
+                      ? 'bg-indigo-600 text-white shadow-lg shadow-indigo-200 dark:shadow-indigo-900/50'
+                      : 'bg-teal-600 text-white shadow-lg shadow-teal-200 dark:shadow-teal-900/50'
                     : 'bg-white dark:bg-slate-800 text-slate-600 dark:text-slate-300 hover:bg-slate-50'
                 }`}
               >
                 {d.year}
               </button>
             ))}
-            <button 
-              onClick={() => setGenModal(true)} 
-              className="px-5 py-3 rounded-2xl text-[15px] whitespace-nowrap bg-amber-50 dark:bg-amber-900/30 text-amber-700 dark:text-amber-400 flex items-center gap-2"
-            >
-              <Sparkles className="w-4 h-4"/> AI出题
-            </button>
+            {writingMode === 'essay' && (
+              <button 
+                onClick={() => setGenModal(true)} 
+                className="px-5 py-3 rounded-2xl text-[15px] whitespace-nowrap bg-amber-50 dark:bg-amber-900/30 text-amber-700 dark:text-amber-400 flex items-center gap-2"
+              >
+                <Sparkles className="w-4 h-4"/> AI出题
+              </button>
+            )}
           </div>
           
-          <EssayWorkflowManager 
-            data={list[idx]} 
-            onSaveVocab={(v) => {if(!vocab.some(x => x.word === v.word)) saveData([v,...vocab], errors)}} 
-            onSaveError={(e) => {saveData(vocab, [e,...errors])}} 
-            onSaveHistory={saveHistory} 
-          />
+          {writingMode === 'essay' ? (
+            <EssayWorkflowManager 
+              data={currentData} 
+              onSaveVocab={(v) => {if(!vocab.some(x => x.word === v.word)) saveData([v,...vocab], errors)}} 
+              onSaveError={(e) => {saveData(vocab, [e,...errors])}} 
+              onSaveHistory={saveHistory} 
+            />
+          ) : (
+            <LetterWorkflowManager 
+              data={currentData} 
+              onSaveVocab={(v) => {if(!vocab.some(x => x.word === v.word)) saveData([v,...vocab], errors)}} 
+              onSaveError={(e) => {saveData(vocab, [e,...errors])}} 
+              onSaveHistory={saveHistory} 
+            />
+          )}
         </main>
 
         {/* 侧边栏遮罩层 - 支持从右边缘滑动打开 */}
@@ -422,7 +448,7 @@ const App = () => {
         <VocabSidebar 
           isOpen={sidebar} 
           toggle={()=>setSidebar(false)} 
-          currentTopic={list[idx].title} 
+          currentTopic={currentData?.title} 
           savedVocab={vocab} 
           savedErrors={errors} 
           onRemoveVocab={(i)=>saveData(vocab.filter((_,x)=>x!==i), errors)} 
@@ -442,8 +468,8 @@ const App = () => {
         <HistoryDrawer 
           isOpen={historyDrawer} 
           onClose={()=>setHistoryDrawer(false)} 
-          history={history[list[idx].id]} 
-          topicTitle={list[idx].title} 
+          history={history[currentData?.id]} 
+          topicTitle={currentData?.title} 
         />
         
         <AISettings isOpen={aiSettings} onClose={()=>setAiSettings(false)} />
@@ -562,17 +588,17 @@ const App = () => {
           isOpen={showAnalytics} 
           onClose={() => setShowAnalytics(false)}
           essay={null}
-          history={history[list[idx]?.id] || []}
+          history={history[currentData?.id] || []}
         />
         
         {/* 学习路径规划弹窗 */}
         <LearningPathPlanner 
           isOpen={showPathPlanner} 
           onClose={() => setShowPathPlanner(false)}
-          examData={list}
+          examData={currentList}
           onSelectTopic={(topic) => {
-            const topicIdx = list.findIndex(t => t.id === topic.id);
-            if (topicIdx !== -1) setIdx(topicIdx);
+            const topicIdx = currentList.findIndex(t => t.id === topic.id);
+            if (topicIdx !== -1) setCurrentIdx(topicIdx);
           }}
         />
       </div>

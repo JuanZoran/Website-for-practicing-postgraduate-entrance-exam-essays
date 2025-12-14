@@ -29,12 +29,21 @@ const VocabSidebar = ({
   const [expandedVocabIndex, setExpandedVocabIndex] = useState(null);
   const [aiVocabList, setAiVocabList] = useState([]);
   const [loading, setLoading] = useState(false);
+  const [addedIndices, setAddedIndices] = useState([]);
   const fileInputRef = useRef(null);
   const sidebarRef = useRef(null);
   const touchStartX = useRef(null);
   const touchStartY = useRef(null);
 
   const toggleVocabExpand = (idx) => setExpandedVocabIndex(expandedVocabIndex === idx ? null : idx);
+
+  const handleAddVocab = (item, idx) => {
+    onAddGeneratedVocab({...item, sourceTopic: currentTopic, timestamp: Date.now()});
+    setAddedIndices(prev => [...prev, idx]);
+    setTimeout(() => {
+      setAddedIndices(prev => prev.filter(i => i !== idx));
+    }, 2000);
+  };
 
   const handleExpandVocab = async () => {
     setLoading(true);
@@ -254,10 +263,10 @@ const VocabSidebar = ({
                         💡 {item.scenario?.replace('Thinking:', '').trim()}
                       </div>
                       <button 
-                        onClick={() => onAddGeneratedVocab({...item, sourceTopic: currentTopic, timestamp: Date.now()})}
-                        className="absolute top-2 right-2 text-indigo-400 hover:text-indigo-600 dark:hover:text-indigo-300 bg-white dark:bg-slate-800 p-1.5 rounded-full shadow-sm hover:shadow transition-all"
+                        onClick={() => handleAddVocab(item, idx)}
+                        className={`absolute top-2 right-2 ${addedIndices.includes(idx) ? 'bg-green-500 text-white' : 'text-indigo-400 hover:text-indigo-600 dark:hover:text-indigo-300 bg-white dark:bg-slate-800'} p-1.5 rounded-full shadow-sm hover:shadow transition-all`}
                       >
-                        <PlusCircle className="w-4 h-4" />
+                        {addedIndices.includes(idx) ? <CheckCircle className="w-4 h-4" /> : <PlusCircle className="w-4 h-4" />}
                       </button>
                     </div>
                   );

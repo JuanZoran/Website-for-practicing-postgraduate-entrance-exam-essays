@@ -243,9 +243,18 @@ const LetterWorkflowManager = ({ data, onSaveVocab, onSaveError, onSaveHistory }
                         <span className="text-xs font-medium text-slate-500 mb-2 block">📚 高分词汇提示</span>
                         <div className="flex flex-wrap gap-2">
                           {feedback[slot.id].vocab_tips.map((tip, i) => (
-                            <span key={i} className="text-xs px-2 py-1 bg-indigo-100 dark:bg-indigo-900/50 text-indigo-700 dark:text-indigo-300 rounded-full">
+                            <button 
+                              key={i} 
+                              onClick={() => onSaveVocab({ 
+                                word: tip, 
+                                meaning: '推荐词汇', 
+                                sourceTopic: data.title,
+                                timestamp: Date.now() 
+                              })}
+                              className="text-xs px-2 py-1 bg-indigo-100 dark:bg-indigo-900/50 text-indigo-700 dark:text-indigo-300 rounded-full hover:bg-indigo-200 dark:hover:bg-indigo-800 active:scale-95 transition-all cursor-pointer"
+                            >
                               {tip}
-                            </span>
+                            </button>
                           ))}
                         </div>
                       </div>

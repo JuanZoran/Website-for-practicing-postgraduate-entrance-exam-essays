@@ -266,6 +266,7 @@ export const GrammarErrorDisplay = ({ original, correction, issue }) => {
  * 推荐词汇列表 - 增强版
  */
 export const RecommendedVocabList = ({ vocabs, onSave }) => {
+  const [savedStatus, setSavedStatus] = useState({});
   if (!vocabs || vocabs.length === 0) return null;
 
   const categoryColors = [
@@ -310,13 +311,45 @@ export const RecommendedVocabList = ({ vocabs, onSave }) => {
               </div>
               {onSave && (
                 <button 
-                  onClick={() => onSave(v)}
-                  className="flex-shrink-0 p-2 text-indigo-500 hover:text-indigo-700 dark:hover:text-indigo-300 hover:bg-indigo-100 dark:hover:bg-indigo-900/50 rounded-lg transition-colors"
-                  title="收藏"
+                  type="button"
+                  onClick={() => {
+                    const word = String(v?.word || '').trim();
+                    if (!word) return;
+                    const didAdd = onSave?.({ ...v, word, timestamp: Date.now() });
+                    setSavedStatus(prev => ({ ...prev, [word]: didAdd ? 'added' : 'exists' }));
+                    window.setTimeout(() => {
+                      setSavedStatus(prev => {
+                        if (!prev[word]) return prev;
+                        const next = { ...prev };
+                        delete next[word];
+                        return next;
+                      });
+                    }, 1500);
+                  }}
+                  className={`flex-shrink-0 p-2 hover:bg-indigo-100 dark:hover:bg-indigo-900/50 rounded-lg transition-colors ${
+                    savedStatus[String(v?.word || '').trim()] === 'added'
+                      ? 'text-green-600 dark:text-green-400'
+                      : savedStatus[String(v?.word || '').trim()] === 'exists'
+                        ? 'text-slate-400'
+                        : 'text-indigo-500 hover:text-indigo-700 dark:hover:text-indigo-300'
+                  }`}
+                  title={
+                    savedStatus[String(v?.word || '').trim()] === 'added'
+                      ? '已加入单词本'
+                      : savedStatus[String(v?.word || '').trim()] === 'exists'
+                        ? '已在单词本'
+                        : '加入单词本'
+                  }
                 >
-                  <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
-                  </svg>
+                  {savedStatus[String(v?.word || '').trim()] ? (
+                    <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+                    </svg>
+                  ) : (
+                    <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
+                    </svg>
+                  )}
                 </button>
               )}
             </div>

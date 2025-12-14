@@ -20,6 +20,7 @@ const LetterWorkflowManager = ({ data, onSaveVocab, onSaveError, onSaveHistory }
   const [initialLetterText, setInitialLetterText] = useState(null);
   const [isFullscreenEditor, setIsFullscreenEditor] = useState(false);
   const [error, setError] = useState(null);
+  const [savedTipStatus, setSavedTipStatus] = useState({});
   const [formatChecks, setFormatChecks] = useState({ salutation: 'warn', signOff: 'warn', punctuation: 'warn' });
   const [checklist, setChecklist] = useState({
     tense: false,
@@ -41,6 +42,7 @@ const LetterWorkflowManager = ({ data, onSaveVocab, onSaveError, onSaveHistory }
     setFinalLetterText(null);
     setInitialLetterText(null);
     setError(null);
+    setSavedTipStatus({});
     setChecklist({ tense: false, agreement: false, spelling: false, signOff: false, points: false });
     clearConversationHistory(`letter_logic_${data.id}`);
     clearConversationHistory(`letter_polish_${data.id}`);
@@ -242,20 +244,46 @@ const LetterWorkflowManager = ({ data, onSaveVocab, onSaveError, onSaveHistory }
                       <div className="mt-3 pt-3 border-t border-slate-200 dark:border-slate-700">
                         <span className="text-xs font-medium text-slate-500 mb-2 block">📚 高分词汇提示</span>
                         <div className="flex flex-wrap gap-2">
-                          {feedback[slot.id].vocab_tips.map((tip, i) => (
-                            <button 
-                              key={i} 
-                              onClick={() => onSaveVocab({ 
-                                word: tip, 
-                                meaning: '推荐词汇', 
-                                sourceTopic: data.title,
-                                timestamp: Date.now() 
-                              })}
-                              className="text-xs px-2 py-1 bg-indigo-100 dark:bg-indigo-900/50 text-indigo-700 dark:text-indigo-300 rounded-full hover:bg-indigo-200 dark:hover:bg-indigo-800 active:scale-95 transition-all cursor-pointer"
-                            >
-                              {tip}
-                            </button>
-                          ))}
+                          {feedback[slot.id].vocab_tips.map((tip, i) => {
+                            const word = String(tip || '').trim();
+                            const key = `${slot.id}:${word}`;
+                            const status = savedTipStatus[key];
+                            const base = "text-xs px-2 py-1 rounded-full active:scale-95 transition-all cursor-pointer";
+                            const cls =
+                              status === 'added'
+                                ? "bg-green-500 text-white"
+                                : status === 'exists'
+                                  ? "bg-slate-200 dark:bg-slate-700 text-slate-600 dark:text-slate-300"
+                                  : "bg-indigo-100 dark:bg-indigo-900/50 text-indigo-700 dark:text-indigo-300 hover:bg-indigo-200 dark:hover:bg-indigo-800";
+
+                            return (
+                              <button
+                                key={i}
+                                type="button"
+                                onClick={() => {
+                                  const didAdd = onSaveVocab?.({
+                                    word,
+                                    meaning: '推荐词汇',
+                                    sourceTopic: data.title,
+                                    timestamp: Date.now()
+                                  });
+                                  setSavedTipStatus(prev => ({ ...prev, [key]: didAdd ? 'added' : 'exists' }));
+                                  window.setTimeout(() => {
+                                    setSavedTipStatus(prev => {
+                                      if (!prev[key]) return prev;
+                                      const next = { ...prev };
+                                      delete next[key];
+                                      return next;
+                                    });
+                                  }, 1500);
+                                }}
+                                className={`${base} ${cls}`}
+                                title={status === 'added' ? '已加入单词本' : status === 'exists' ? '已在单词本' : '加入单词本'}
+                              >
+                                {word}
+                              </button>
+                            );
+                          })}
                         </div>
                       </div>
                     )}

@@ -129,10 +129,40 @@ export function AppProvider({ children }) {
   }, [user, isLeanCloudEnabled, isAnonymous, history]);
 
   const addVocab = useCallback((v) => {
-    if (!vocab.some(x => x.word === v.word)) {
-      saveData([v, ...vocab], errors);
+    if (!v) return false;
+    const word = String(v.word || '').trim();
+    if (!word) return false;
+
+    // Use localStorage as the merge source to avoid losing additions when multiple
+    // "add" actions happen in the same render frame (batched state updates).
+    let currentVocab = [];
+    try {
+      currentVocab = JSON.parse(localStorage.getItem('kaoyan_vocab') || '[]');
+    } catch {
+      currentVocab = [];
     }
-  }, [vocab, errors, saveData]);
+    if (!Array.isArray(currentVocab)) currentVocab = [];
+    const alreadyExists = currentVocab.some(x => String(x?.word || '').trim() === word);
+    if (alreadyExists) return false;
+
+    const nextVocab = [{ ...v, word }, ...currentVocab];
+    setVocab(nextVocab);
+    localStorage.setItem('kaoyan_vocab', JSON.stringify(nextVocab));
+
+    if (user && isLeanCloudEnabled && !isAnonymous) {
+      let currentErrors = [];
+      try {
+        currentErrors = JSON.parse(localStorage.getItem('kaoyan_errors') || '[]');
+      } catch {
+        currentErrors = [];
+      }
+      if (!Array.isArray(currentErrors)) currentErrors = [];
+      saveUserData(user.uid, 'notebook', { vocab: nextVocab, errors: currentErrors })
+        .catch(err => console.warn("Cloud save failed:", err));
+    }
+
+    return true;
+  }, [user, isLeanCloudEnabled, isAnonymous]);
 
   const addError = useCallback((e) => {
     saveData(vocab, [e, ...errors]);

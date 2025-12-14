@@ -29,7 +29,7 @@ const VocabSidebar = ({
   const [expandedVocabIndex, setExpandedVocabIndex] = useState(null);
   const [aiVocabList, setAiVocabList] = useState([]);
   const [loading, setLoading] = useState(false);
-  const [addedIndices, setAddedIndices] = useState([]);
+  const [addStatusByIndex, setAddStatusByIndex] = useState({});
   const fileInputRef = useRef(null);
   const sidebarRef = useRef(null);
   const touchStartX = useRef(null);
@@ -38,11 +38,16 @@ const VocabSidebar = ({
   const toggleVocabExpand = (idx) => setExpandedVocabIndex(expandedVocabIndex === idx ? null : idx);
 
   const handleAddVocab = (item, idx) => {
-    onAddGeneratedVocab({...item, sourceTopic: currentTopic, timestamp: Date.now()});
-    setAddedIndices(prev => [...prev, idx]);
-    setTimeout(() => {
-      setAddedIndices(prev => prev.filter(i => i !== idx));
-    }, 2000);
+    const didAdd = onAddGeneratedVocab?.({ ...item, sourceTopic: currentTopic, timestamp: Date.now() });
+    setAddStatusByIndex(prev => ({ ...prev, [idx]: didAdd ? 'added' : 'exists' }));
+    window.setTimeout(() => {
+      setAddStatusByIndex(prev => {
+        if (!prev[idx]) return prev;
+        const next = { ...prev };
+        delete next[idx];
+        return next;
+      });
+    }, 1500);
   };
 
   const handleExpandVocab = async () => {
@@ -263,17 +268,25 @@ const VocabSidebar = ({
                         💡 {item.scenario?.replace('Thinking:', '').trim()}
                       </div>
                       <button 
+                        type="button"
                         onClick={() => handleAddVocab(item, idx)}
-                        className={`absolute top-2 right-2 ${addedIndices.includes(idx) ? 'bg-green-500 text-white' : 'text-indigo-400 hover:text-indigo-600 dark:hover:text-indigo-300 bg-white dark:bg-slate-800'} p-1.5 rounded-full shadow-sm hover:shadow transition-all`}
+                        className={`absolute top-2 right-2 ${
+                          addStatusByIndex[idx] === 'added'
+                            ? 'bg-green-500 text-white'
+                            : addStatusByIndex[idx] === 'exists'
+                              ? 'bg-slate-200 dark:bg-slate-700 text-slate-600 dark:text-slate-200'
+                              : 'text-indigo-400 hover:text-indigo-600 dark:hover:text-indigo-300 bg-white dark:bg-slate-800'
+                        } p-1.5 rounded-full shadow-sm hover:shadow transition-all`}
+                        title={addStatusByIndex[idx] === 'added' ? '已加入单词本' : addStatusByIndex[idx] === 'exists' ? '已在单词本' : '加入单词本'}
                       >
-                        {addedIndices.includes(idx) ? <CheckCircle className="w-4 h-4" /> : <PlusCircle className="w-4 h-4" />}
+                        {addStatusByIndex[idx] ? <CheckCircle className="w-4 h-4" /> : <PlusCircle className="w-4 h-4" />}
                       </button>
                     </div>
                   );
                 })}
                 {aiVocabList.length > 0 && (
                   <Ripples>
-                    <button onClick={handleExpandVocab} className="w-full mt-2 text-xs text-indigo-600 dark:text-indigo-400 underline text-center py-2 min-h-[44px]">换一批</button>
+                    <button type="button" onClick={handleExpandVocab} className="w-full mt-2 text-xs text-indigo-600 dark:text-indigo-400 underline text-center py-2 min-h-[44px]">换一批</button>
                   </Ripples>
                 )}
               </div>

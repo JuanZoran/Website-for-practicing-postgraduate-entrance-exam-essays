@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef } from 'react';
 import { 
   BookOpen, Loader, BrainCircuit, Sparkles, 
-  Check, PlusCircle, RotateCcw, BarChart2, Brain, Library
+  Check, PlusCircle, RotateCcw, BarChart2, Brain, Library, CheckCircle
 } from 'lucide-react';
 import { callAI, clearConversationHistory } from "../services/aiService";
 import { buildPrompt } from "../services/promptService";
@@ -27,6 +27,7 @@ const EssayWorkflowManager = ({ data, onSaveVocab, onSaveError, onSaveHistory })
   const [showMaterialLibrary, setShowMaterialLibrary] = useState(false);
   const [error, setError] = useState(null);
   const [activeInputField, setActiveInputField] = useState(null);
+  const [savedVocabStatus, setSavedVocabStatus] = useState({});
   const essayTextareaRef = useRef(null);
   const fullscreenTextareaRef = useRef(null);
   
@@ -36,6 +37,7 @@ const EssayWorkflowManager = ({ data, onSaveVocab, onSaveError, onSaveHistory })
     setFeedback({cn:{}, en:{}, final:null}); 
     setFinalEssayText(null);
     setInitialEssayText(null);
+    setSavedVocabStatus({});
     // 清除该题目的对话历史
     clearConversationHistory(`logic_${data.id}`);
     clearConversationHistory(`grammar_${data.id}`);
@@ -223,6 +225,22 @@ const EssayWorkflowManager = ({ data, onSaveVocab, onSaveError, onSaveHistory })
     setLoading(null);
   };
 
+  const handleSaveRecommendedVocab = (slotId, v) => {
+    const word = String(v?.word || '').trim();
+    if (!word) return;
+    const key = `${slotId}:${word}`;
+    const didAdd = onSaveVocab?.({ ...v, word, sourceTopic: data.title, timestamp: Date.now() });
+    setSavedVocabStatus(prev => ({ ...prev, [key]: didAdd ? 'added' : 'exists' }));
+    window.setTimeout(() => {
+      setSavedVocabStatus(prev => {
+        if (!prev[key]) return prev;
+        const next = { ...prev };
+        delete next[key];
+        return next;
+      });
+    }, 1500);
+  };
+
   // 获取词性颜色方案
   const getColorScheme = (meaning) => {
     const m = (meaning || '').toLowerCase();
@@ -397,12 +415,28 @@ const EssayWorkflowManager = ({ data, onSaveVocab, onSaveError, onSaveHistory })
                                   </div>
                                 )}
                               </div>
-                              <button 
-                                onClick={() => onSaveVocab({...v, sourceTopic: data.title, timestamp: Date.now()})} 
-                                className="flex-shrink-0 p-2 text-indigo-500 hover:text-indigo-700 dark:hover:text-indigo-300 hover:bg-indigo-100 dark:hover:bg-indigo-900/50 rounded-lg transition-colors"
-                              >
-                                <PlusCircle className="w-5 h-5" />
-                              </button>
+                              {(() => {
+                                const statusKey = `${slot.id}:${String(v?.word || '').trim()}`;
+                                const status = savedVocabStatus[statusKey];
+                                const Icon = status ? CheckCircle : PlusCircle;
+                                const iconClass =
+                                  status === 'added'
+                                    ? 'text-green-600 dark:text-green-400'
+                                    : status === 'exists'
+                                      ? 'text-slate-400'
+                                      : 'text-indigo-500 hover:text-indigo-700 dark:hover:text-indigo-300';
+
+                                return (
+                                  <button
+                                    type="button"
+                                    onClick={() => handleSaveRecommendedVocab(slot.id, v)}
+                                    className={`flex-shrink-0 p-2 hover:bg-indigo-100 dark:hover:bg-indigo-900/50 rounded-lg transition-colors ${iconClass}`}
+                                    title={status === 'added' ? '已加入单词本' : status === 'exists' ? '已在单词本' : '加入单词本'}
+                                  >
+                                    <Icon className="w-5 h-5" />
+                                  </button>
+                                );
+                              })()}
                             </div>
                           </div>
                         );

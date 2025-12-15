@@ -119,14 +119,23 @@ export function AppProvider({ children }) {
   }, [user, isLeanCloudEnabled, isAnonymous]);
 
   const saveHistory = useCallback((topicId, record) => {
-    const newHistory = { ...history, [topicId]: [...(history[topicId] || []), record] };
-    setHistory(newHistory);
-    localStorage.setItem('kaoyan_history', JSON.stringify(newHistory));
-    if (user && isLeanCloudEnabled && !isAnonymous) {
-      saveUserData(user.uid, 'history', { records: newHistory })
-        .catch(err => console.warn("History save failed:", err));
-    }
-  }, [user, isLeanCloudEnabled, isAnonymous, history]);
+    setHistory((prev) => {
+      const next = { ...prev, [topicId]: [...(prev[topicId] || []), record] };
+      try {
+        localStorage.setItem('kaoyan_history', JSON.stringify(next));
+      } catch (e) {
+        console.warn('Failed to persist history:', e);
+      }
+
+      if (user && isLeanCloudEnabled && !isAnonymous) {
+        saveUserData(user.uid, 'history', { records: next }).catch((err) =>
+          console.warn('History save failed:', err)
+        );
+      }
+
+      return next;
+    });
+  }, [user, isLeanCloudEnabled, isAnonymous]);
 
   const addVocab = useCallback((v) => {
     if (!v) return false;

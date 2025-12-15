@@ -16,6 +16,8 @@ import {
   getStageDetails,
   getRecommendedTopics,
   getLearningStats,
+  recordTopicCompletion,
+  updateSkillLevelsFromFeedback,
   LEARNING_STAGES,
   SKILL_DIMENSIONS
 } from '../services/learningPathService';
@@ -38,12 +40,10 @@ const LearningPathPlanner = ({ isOpen, onClose, examData, onSelectTopic }) => {
     const handlePracticeCompleted = (event) => {
       const { topicId, score, feedback } = event.detail || {};
       if (topicId) {
-        import('../services/learningPathService').then(({ recordTopicCompletion, updateSkillLevelsFromFeedback }) => {
-          recordTopicCompletion(topicId, score || 0);
-          if (feedback) {
-            updateSkillLevelsFromFeedback(feedback);
-          }
-        });
+        recordTopicCompletion(topicId, score || 0);
+        if (feedback) {
+          updateSkillLevelsFromFeedback(feedback);
+        }
       }
     };
 

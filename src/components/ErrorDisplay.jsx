@@ -3,7 +3,7 @@
  * 提供用户友好的错误提示和恢复建议
  */
 
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { 
   AlertCircle, RefreshCw, Settings, LogIn, Trash2, 
   ChevronDown, ChevronUp, X, Copy, Check
@@ -180,11 +180,12 @@ export const InlineError = ({ error, onRetry }) => {
 export const RetryIndicator = ({ currentRetry, maxRetries, delay }) => {
   const [countdown, setCountdown] = useState(Math.ceil(delay / 1000));
 
-  useState(() => {
-    const timer = setInterval(() => {
-      setCountdown(prev => Math.max(0, prev - 1));
+  useEffect(() => {
+    setCountdown(Math.ceil(delay / 1000));
+    const timer = window.setInterval(() => {
+      setCountdown((prev) => Math.max(0, prev - 1));
     }, 1000);
-    return () => clearInterval(timer);
+    return () => window.clearInterval(timer);
   }, [delay]);
 
   return (

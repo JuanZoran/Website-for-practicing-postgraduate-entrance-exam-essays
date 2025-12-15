@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useState, lazy, Suspense } from 'react';
 import { 
   BookOpen, PenTool, List, Sparkles, Loader, 
   Moon, Sun, Clock, User, Settings, LogOut, LogIn, ChevronRight,
@@ -7,20 +7,21 @@ import {
 } from 'lucide-react';
 import { useAuth, useAppData } from "./context";
 import { EdgeSwipeDetector, SwipeableTopicCards } from "./components/common";
-import AISettings from "./components/AISettings";
-import AuthModal from "./components/AuthModal";
-import HistoryDrawer from "./components/HistoryDrawer";
-import VocabSidebar from "./components/VocabSidebar";
 import QuestionVisualizer from "./components/QuestionVisualizer";
-import TopicGeneratorModal from "./components/TopicGeneratorModal";
 import EssayWorkflowManager from "./components/EssayWorkflowManager";
 import LetterWorkflowManager from "./components/LetterWorkflowManager";
 import WritingModeSwitch from "./components/WritingModeSwitch";
-import PersonalizedLearning from "./components/PersonalizedLearning";
-import AdvancedAnalytics from "./components/AdvancedAnalytics";
-import LearningPathPlanner from "./components/LearningPathPlanner";
 import { INITIAL_EXAM_DATA } from "./data/examData";
 import { INITIAL_LETTER_DATA } from "./data/letterData";
+
+const AISettings = lazy(() => import('./components/AISettings'));
+const AuthModal = lazy(() => import('./components/AuthModal'));
+const HistoryDrawer = lazy(() => import('./components/HistoryDrawer'));
+const TopicGeneratorModal = lazy(() => import('./components/TopicGeneratorModal'));
+const VocabSidebar = lazy(() => import('./components/VocabSidebar'));
+const PersonalizedLearning = lazy(() => import('./components/PersonalizedLearning'));
+const AdvancedAnalytics = lazy(() => import('./components/AdvancedAnalytics'));
+const LearningPathPlanner = lazy(() => import('./components/LearningPathPlanner'));
 
 const App = () => {
   const { 
@@ -49,7 +50,7 @@ const App = () => {
   const [showLearning, setShowLearning] = useState(false);
   const [showAnalytics, setShowAnalytics] = useState(false);
   const [showPathPlanner, setShowPathPlanner] = useState(false);
-  const [showSettings, setShowSettings] = useState(false);
+  const [sidebarMounted, setSidebarMounted] = useState(false);
 
   const currentList = writingMode === 'essay' ? list : letterList;
   const currentIdx = writingMode === 'essay' ? idx : letterIdx;
@@ -62,6 +63,16 @@ const App = () => {
     const localHistory = JSON.parse(localStorage.getItem('kaoyan_history') || '{}');
     await handleLoginSuccess(newUser, { vocab: localVocab, errors: localErrors, history: localHistory });
   };
+
+  useEffect(() => {
+    if (sidebar) {
+      setSidebarMounted(true);
+      return;
+    }
+    if (!sidebarMounted) return;
+    const timeoutId = window.setTimeout(() => setSidebarMounted(false), 320);
+    return () => window.clearTimeout(timeoutId);
+  }, [sidebar, sidebarMounted]);
 
   return (
     <div className={dark ? 'dark' : ''}>
@@ -101,7 +112,7 @@ const App = () => {
             <button onClick={() => setShowLearning(true)} className="p-2 bg-slate-100 dark:bg-slate-700 rounded-full hover:bg-slate-200 dark:hover:bg-slate-600 transition-colors min-h-[44px] min-w-[44px] flex items-center justify-center" title="学习分析">
               <Brain className="w-4 h-4"/>
             </button>
-            <button onClick={() => setShowSettings(true)} className="hidden md:flex p-2 bg-slate-100 dark:bg-slate-700 rounded-full hover:bg-slate-200 dark:hover:bg-slate-600 transition-colors min-h-[44px] min-w-[44px] items-center justify-center" title="AI设置">
+            <button onClick={() => setAiSettings(true)} className="hidden md:flex p-2 bg-slate-100 dark:bg-slate-700 rounded-full hover:bg-slate-200 dark:hover:bg-slate-600 transition-colors min-h-[44px] min-w-[44px] items-center justify-center" title="AI设置">
               <Settings className="w-4 h-4"/>
             </button>
             <button onClick={handleExportData} className="md:hidden p-2 bg-slate-100 dark:bg-slate-700 rounded-full hover:bg-slate-200 dark:hover:bg-slate-600 transition-colors min-h-[44px] min-w-[44px] flex items-center justify-center" title="导出数据">
@@ -252,22 +263,26 @@ const App = () => {
           </div>
         </main>
 
-        <EdgeSwipeDetector onSwipeRight={() => setSidebar(true)} enabled={!sidebar} />
+        <EdgeSwipeDetector onSwipeRight={() => setSidebar(true)} enabled={!sidebar && !sidebarMounted} />
         {sidebar && <div className="fixed inset-0 bg-black/40 z-20 animate-fadeIn" onClick={() => setSidebar(false)} />}
         
-        <VocabSidebar 
-          isOpen={sidebar} 
-          toggle={() => setSidebar(false)} 
-          currentTopic={currentData?.title} 
-          savedVocab={vocab} 
-          savedErrors={errors} 
-          onRemoveVocab={removeVocab} 
-          onRemoveError={removeError} 
-          onImportData={handleImportData} 
-          onExportData={handleExportData} 
-          onAddGeneratedVocab={addVocab} 
-          user={user} 
-        />
+        {(sidebar || sidebarMounted) && (
+          <Suspense fallback={null}>
+            <VocabSidebar
+              isOpen={sidebar}
+              toggle={() => setSidebar(false)}
+              currentTopic={currentData?.title}
+              savedVocab={vocab}
+              savedErrors={errors}
+              onRemoveVocab={removeVocab}
+              onRemoveError={removeError}
+              onImportData={handleImportData}
+              onExportData={handleExportData}
+              onAddGeneratedVocab={addVocab}
+              user={user}
+            />
+          </Suspense>
+        )}
         
         {topicSheet && (
           <>
@@ -305,28 +320,44 @@ const App = () => {
           </>
         )}
         
-        <TopicGeneratorModal 
-          isOpen={genModal} 
-          onClose={() => setGenModal(false)} 
-          onGenerate={(t) => { setList([...list, t]); setIdx(list.length); }} 
-        />
+        {genModal && (
+          <Suspense fallback={null}>
+            <TopicGeneratorModal
+              isOpen={genModal}
+              onClose={() => setGenModal(false)}
+              onGenerate={(t) => { setList([...list, t]); setIdx(list.length); }}
+            />
+          </Suspense>
+        )}
         
-        <HistoryDrawer 
-          isOpen={historyDrawer} 
-          onClose={() => setHistoryDrawer(false)} 
-          history={history[currentData?.id]} 
-          topicTitle={currentData?.title} 
-        />
+        {historyDrawer && (
+          <Suspense fallback={null}>
+            <HistoryDrawer
+              isOpen={historyDrawer}
+              onClose={() => setHistoryDrawer(false)}
+              history={history[currentData?.id]}
+              topicTitle={currentData?.title}
+            />
+          </Suspense>
+        )}
         
-        <AISettings isOpen={aiSettings} onClose={() => setAiSettings(false)} />
+        {aiSettings && (
+          <Suspense fallback={null}>
+            <AISettings isOpen={aiSettings} onClose={() => setAiSettings(false)} />
+          </Suspense>
+        )}
         
-        <AuthModal 
-          isOpen={authModal} 
-          onClose={closeAuthModal} 
-          auth={isLeanCloudEnabled ? {} : null}
-          db={isLeanCloudEnabled ? {} : null}
-          onLoginSuccess={onLoginSuccess}
-        />
+        {authModal && (
+          <Suspense fallback={null}>
+            <AuthModal
+              isOpen={authModal}
+              onClose={closeAuthModal}
+              auth={isLeanCloudEnabled ? {} : null}
+              db={isLeanCloudEnabled ? {} : null}
+              onLoginSuccess={onLoginSuccess}
+            />
+          </Suspense>
+        )}
         
         {profileSheet && (
           <>
@@ -398,26 +429,36 @@ const App = () => {
           </>
         )}
         
-        <PersonalizedLearning isOpen={showLearning} onClose={() => setShowLearning(false)} />
+        {showLearning && (
+          <Suspense fallback={null}>
+            <PersonalizedLearning isOpen={showLearning} onClose={() => setShowLearning(false)} />
+          </Suspense>
+        )}
         
-        <AdvancedAnalytics 
-          isOpen={showAnalytics} 
-          onClose={() => setShowAnalytics(false)}
-          essay={null}
-          history={history[currentData?.id] || []}
-        />
+        {showAnalytics && (
+          <Suspense fallback={null}>
+            <AdvancedAnalytics
+              isOpen={showAnalytics}
+              onClose={() => setShowAnalytics(false)}
+              essay={null}
+              history={history[currentData?.id] || []}
+            />
+          </Suspense>
+        )}
         
-        <LearningPathPlanner 
-          isOpen={showPathPlanner} 
-          onClose={() => setShowPathPlanner(false)}
-          examData={currentList}
-          onSelectTopic={(topic) => {
-            const topicIdx = currentList.findIndex(t => t.id === topic.id);
-            if (topicIdx !== -1) setCurrentIdx(topicIdx);
-          }}
-        />
-        
-        <AISettings isOpen={showSettings} onClose={() => setShowSettings(false)} />
+        {showPathPlanner && (
+          <Suspense fallback={null}>
+            <LearningPathPlanner
+              isOpen={showPathPlanner}
+              onClose={() => setShowPathPlanner(false)}
+              examData={currentList}
+              onSelectTopic={(topic) => {
+                const topicIdx = currentList.findIndex(t => t.id === topic.id);
+                if (topicIdx !== -1) setCurrentIdx(topicIdx);
+              }}
+            />
+          </Suspense>
+        )}
       </div>
     </div>
   );

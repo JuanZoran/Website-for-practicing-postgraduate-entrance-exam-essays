@@ -1,28 +1,29 @@
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, lazy, Suspense } from 'react';
 import { 
   BookOpen, Loader, BrainCircuit, Sparkles, 
   Check, PlusCircle, RotateCcw, BarChart2, Brain, Library, CheckCircle
 } from 'lucide-react';
-import { callAIStream, clearConversationHistory } from "../services/aiService";
+import { clearConversationHistoryByPrefix } from "../services/aiService";
 import { buildPrompt } from "../services/promptService";
 import { FollowUpChat } from "./FollowUpChat";
 import { GrammarScoreDisplay, FinalScoreDisplay, LogicStatusDisplay } from "./ScoreDisplay";
 import SimpleMarkdown from "./SimpleMarkdown";
-import ModelEssayModal from "./ModelEssayModal";
 import { StreamingFeedbackCard } from "./StreamingText";
-import PersonalizedLearning from "./PersonalizedLearning";
-import AdvancedAnalytics from "./AdvancedAnalytics";
-import WritingMaterialLibrary from "./WritingMaterialLibrary";
 import { InlineError } from "./ErrorDisplay";
 import { recordPractice, analyzeEssayErrors, recordErrorPattern } from "../services/learningAnalyticsService";
-import { parseJsonFromResponse, splitFinalJsonBlock } from "../utils/streamingJson";
+import { useStreamingAIJob } from "../hooks/useStreamingAIJob";
+import { buildFinalJsonPrompt } from "../utils/finalJsonPrompt";
+import { normalizeEssayGrammarJson, normalizeEssayLogicJson, normalizeEssayScoringJson } from "../utils/aiResponseNormalization";
+
+const ModelEssayModal = lazy(() => import('./ModelEssayModal'));
+const PersonalizedLearning = lazy(() => import('./PersonalizedLearning'));
+const AdvancedAnalytics = lazy(() => import('./AdvancedAnalytics'));
+const WritingMaterialLibrary = lazy(() => import('./WritingMaterialLibrary'));
 
 const EssayWorkflowManager = ({ data, onSaveVocab, onSaveError, onSaveHistory }) => {
   const [step, setStep] = useState(0);
   const [inputs, setInputs] = useState({cn:{}, en:{}});
   const [feedback, setFeedback] = useState({cn:{}, en:{}, final:null});
-  const [loading, setLoading] = useState(null);
-  const [streaming, setStreaming] = useState({ type: null, id: null, text: '' });
   const [finalEssayText, setFinalEssayText] = useState(null);
   const [initialEssayText, setInitialEssayText] = useState(null);
   const [isFullscreenEditor, setIsFullscreenEditor] = useState(false);
@@ -30,27 +31,12 @@ const EssayWorkflowManager = ({ data, onSaveVocab, onSaveError, onSaveHistory })
   const [showLearning, setShowLearning] = useState(false);
   const [showAnalytics, setShowAnalytics] = useState(false);
   const [showMaterialLibrary, setShowMaterialLibrary] = useState(false);
-  const [error, setError] = useState(null);
   const [activeInputField, setActiveInputField] = useState(null);
   const [savedVocabStatus, setSavedVocabStatus] = useState({});
   const essayTextareaRef = useRef(null);
   const fullscreenTextareaRef = useRef(null);
-  const abortRef = useRef(null);
 
-  const abortOnly = () => {
-    if (abortRef.current) {
-      abortRef.current.abort();
-      abortRef.current = null;
-    }
-  };
-
-  const stopStreaming = () => {
-    abortOnly();
-    setStreaming({ type: null, id: null, text: '' });
-    setLoading(null);
-  };
-
-  useEffect(() => () => abortOnly(), []);
+  const { loading, streaming, error, runJob, stopStreaming, clearError } = useStreamingAIJob();
   
   useEffect(() => { 
     stopStreaming();
@@ -61,10 +47,11 @@ const EssayWorkflowManager = ({ data, onSaveVocab, onSaveError, onSaveHistory })
     setInitialEssayText(null);
     setSavedVocabStatus({});
     setShowModelEssay(false);
+    clearError();
     // 清除该题目的对话历史
-    clearConversationHistory(`logic_${data.id}`);
-    clearConversationHistory(`grammar_${data.id}`);
-    clearConversationHistory(`scoring_${data.id}`);
+    clearConversationHistoryByPrefix(`logic_${data.id}`);
+    clearConversationHistoryByPrefix(`grammar_${data.id}`);
+    clearConversationHistoryByPrefix(`scoring_${data.id}`);
   }, [data]);
 
   // Initialize essay text when entering step 2
@@ -133,136 +120,79 @@ const EssayWorkflowManager = ({ data, onSaveVocab, onSaveError, onSaveHistory })
 
   const handleLogic = async (id) => {
     if (!inputs.cn[id]) return;
-    if (loading) return;
-    setLoading(id);
-    setError(null);
-    setFeedback(prev => ({ ...prev, cn: { ...prev.cn, [id]: null } }));
-    setStreaming({ type: 'logic', id, text: '' });
-
-    const controller = new AbortController();
-    abortRef.current = controller;
-    try {
-      const slotInfo = data.slots.find(s => s.id === id);
-      const basePrompt = buildPrompt('logic', {
-        topic: data.title,
-        description: data.description,
-        userInput: inputs.cn[id],
-        slotType: `${slotInfo?.label || '思路'} (${getSlotTypeDescription(id)})`
-      });
-
-      const prompt = `${basePrompt || `Task: Kaoyan Logic Check. Topic: ${data.title}. User Idea: "${inputs.cn[id]}".`}
-
-## 输出格式（重要，支持流式展示）
-请忽略上文对输出格式的要求，仅按以下格式输出。
-请按两段输出：
-1) 先输出给学生看的中文 Markdown 反馈（可包含小标题/要点/建议），用于流式展示。
-2) 最后一段必须输出如下包裹的 JSON（不要用 \`\`\` 包裹，不要输出任何多余字符）：
-<FINAL_JSON>
-{"status":"pass/warn/fail","comment":"(与上面的 Markdown 反馈保持一致，可直接复用)","suggestion":"一句话改进建议"}
-</FINAL_JSON>`;
-
-      const res = await callAIStream(prompt, {
-        signal: controller.signal,
-        onChunk: (_chunk, fullContent) => {
-          const { displayText } = splitFinalJsonBlock(fullContent);
-          setStreaming({ type: 'logic', id, text: displayText });
-        }
-      });
-
-      if (controller.signal.aborted || !res) return;
-      const { json, displayText } = parseJsonFromResponse(res);
-      if (!json) {
-        throw new Error('AI 返回格式解析失败，请重试');
+    const slotInfo = data.slots.find((s) => s.id === id);
+    const basePrompt = buildPrompt('logic', {
+      topic: data.title,
+      description: data.description,
+      userInput: inputs.cn[id],
+      slotType: `${slotInfo?.label || '思路'} (${getSlotTypeDescription(id)})`
+    });
+    const prompt = buildFinalJsonPrompt(
+      basePrompt || `Task: Kaoyan Logic Check. Topic: ${data.title}. User Idea: "${inputs.cn[id]}".`,
+      {
+        markdownInstruction: '先输出给学生看的中文 Markdown 反馈（可包含小标题/要点/建议），用于流式展示。',
+        jsonExample:
+          '{"status":"pass/warn/fail","comment":"(与上面的 Markdown 反馈保持一致，可直接复用)","suggestion":"一句话改进建议"}',
       }
-      
-      // 检查是否返回了错误
-      if (json.error || json.status === 'error') {
-        setError({ message: json.error || json.message || displayText, id, type: 'logic' });
-      } else {
-        setFeedback(prev => ({...prev, cn: {...prev.cn, [id]: json}}));
+    );
+
+    await runJob({
+      type: 'logic',
+      id,
+      prompt,
+      loadingKey: id,
+      errorId: id,
+      fallbackErrorMessage: '审题失败，请重试',
+      normalizeJson: normalizeEssayLogicJson,
+      onStart: () => {
+        setFeedback((prev) => ({ ...prev, cn: { ...prev.cn, [id]: null } }));
+      },
+      onSuccess: ({ json }) => {
+        setFeedback((prev) => ({ ...prev, cn: { ...prev.cn, [id]: json } }));
         onSaveHistory(data.id, { type: 'logic', input: inputs.cn[id], feedback: json, timestamp: Date.now() });
       }
-    } catch(e) { 
-      if (!controller.signal.aborted) {
-        console.error('Logic check error:', e);
-        setError({ message: e?.message || '审题失败，请重试', id, type: 'logic' });
-      }
-    }
-    if (!controller.signal.aborted) {
-      setLoading(null);
-      setStreaming({ type: null, id: null, text: '' });
-    }
-    if (abortRef.current === controller) abortRef.current = null;
+    });
   };
 
   const handleGrammar = async (id) => {
     if (!inputs.en[id]) return;
-    if (loading) return;
-    setLoading(id);
-    setError(null);
-    setFeedback(prev => ({ ...prev, en: { ...prev.en, [id]: null } }));
-    setStreaming({ type: 'grammar', id, text: '' });
-
-    const controller = new AbortController();
-    abortRef.current = controller;
-    try {
-      const basePrompt = buildPrompt('grammar', {
-        topic: data.title,
-        description: data.description,
-        chineseInput: inputs.cn[id],
-        englishInput: inputs.en[id]
-      });
-      const prompt = `${basePrompt || `Task: Kaoyan Grammar Check. Topic: ${data.title}. CN: "${inputs.cn[id]}". EN: "${inputs.en[id]}".`}
-
-## 输出格式（重要，支持流式展示）
-请忽略上文对输出格式的要求，仅按以下格式输出。
-请按两段输出：
-1) 先输出给学生看的中文 Markdown 总体评价与修改建议（用于流式展示）。
-2) 最后一段必须输出如下包裹的 JSON（不要用 \`\`\` 包裹，不要输出任何多余字符）：
-<FINAL_JSON>
-{
+    const basePrompt = buildPrompt('grammar', {
+      topic: data.title,
+      description: data.description,
+      chineseInput: inputs.cn[id],
+      englishInput: inputs.en[id]
+    });
+    const prompt = buildFinalJsonPrompt(
+      basePrompt || `Task: Kaoyan Grammar Check. Topic: ${data.title}. CN: "${inputs.cn[id]}". EN: "${inputs.en[id]}".`,
+      {
+        markdownInstruction: '先输出给学生看的中文 Markdown 总体评价与修改建议（用于流式展示）。',
+        jsonExample: `{
   "score": 1-10,
   "comment": "(与上面的 Markdown 评价保持一致，可直接复用)",
   "grammar_issues": [{"original":"...","correction":"...","issue":"..."}],
   "recommended_vocab": [{"word":"...","meaning":"...","collocation":"...","example":"...","scenario":"..."}],
   "improved_version": "润色后的完整句子"
-}
-</FINAL_JSON>`;
+}`,
+      }
+    );
 
-      const res = await callAIStream(prompt, {
-        signal: controller.signal,
-        onChunk: (_chunk, fullContent) => {
-          const { displayText } = splitFinalJsonBlock(fullContent);
-          setStreaming({ type: 'grammar', id, text: displayText });
-        }
-      });
-
-      if (controller.signal.aborted || !res) return;
-      const { json, displayText } = parseJsonFromResponse(res);
-      if (!json) {
-        throw new Error('AI 返回格式解析失败，请重试');
+    await runJob({
+      type: 'grammar',
+      id,
+      prompt,
+      loadingKey: id,
+      errorId: id,
+      fallbackErrorMessage: '润色失败，请重试',
+      normalizeJson: normalizeEssayGrammarJson,
+      onStart: () => {
+        setFeedback((prev) => ({ ...prev, en: { ...prev.en, [id]: null } }));
+      },
+      onSuccess: ({ json }) => {
+        setFeedback((prev) => ({ ...prev, en: { ...prev.en, [id]: json } }));
+        onSaveHistory(data.id, { type: 'grammar', input: inputs.en[id], feedback: json, timestamp: Date.now() });
+        if (json.grammar_issues?.length) json.grammar_issues.forEach((err) => onSaveError({ ...err, timestamp: Date.now() }));
       }
-      
-      // 检查是否返回了错误
-      if (json.error || json.status === 'error') {
-        setError({ message: json.error || json.message || displayText, id, type: 'grammar' });
-        return;
-      }
-      
-      setFeedback(prev => ({...prev, en: {...prev.en, [id]: json}}));
-      onSaveHistory(data.id, { type: 'grammar', input: inputs.en[id], feedback: json, timestamp: Date.now() });
-      if (json.grammar_issues?.length) json.grammar_issues.forEach(err => onSaveError({...err, timestamp: Date.now()}));
-    } catch(e) { 
-      if (!controller.signal.aborted) {
-        console.error('Grammar check error:', e);
-        setError({ message: e?.message || '润色失败，请重试', id, type: 'grammar' });
-      }
-    }
-    if (!controller.signal.aborted) {
-      setLoading(null);
-      setStreaming({ type: null, id: null, text: '' });
-    }
-    if (abortRef.current === controller) abortRef.current = null;
+    });
   };
 
   const generateEssayText = () => {
@@ -279,80 +209,50 @@ const EssayWorkflowManager = ({ data, onSaveVocab, onSaveError, onSaveHistory })
 
   const handleFinal = async () => {
     if (loading) return;
-    setLoading('final');
-    setError(null);
-    setFeedback(prev => ({ ...prev, final: null }));
-    setStreaming({ type: 'scoring', id: 'final', text: '' });
     const text = finalEssayText || generateEssayText();
+    const basePrompt = buildPrompt('scoring', {
+      topic: data.title,
+      description: data.description,
+      essay: text
+    });
+    const prompt = buildFinalJsonPrompt(basePrompt || `Task: Grade Essay (20pts). Topic: ${data.title}. Text: ${text}.`, {
+      markdownInstruction: '先输出给学生看的中文 Markdown 阅卷评语（用于流式展示）。',
+      jsonExample:
+        '{"score":0-20,"comment":"(与上面的 Markdown 评语保持一致，可直接复用)","strengths":["..."],"weaknesses":["..."]}',
+    });
 
-    const controller = new AbortController();
-    abortRef.current = controller;
-    try {
-      const basePrompt = buildPrompt('scoring', {
-        topic: data.title,
-        description: data.description,
-        essay: text
-      });
-      const prompt = `${basePrompt || `Task: Grade Essay (20pts). Topic: ${data.title}. Text: ${text}.`}
+    await runJob({
+      type: 'scoring',
+      id: 'final',
+      prompt,
+      loadingKey: 'final',
+      errorId: 'final',
+      fallbackErrorMessage: '评分失败，请重试',
+      normalizeJson: normalizeEssayScoringJson,
+      onStart: () => {
+        setFeedback((prev) => ({ ...prev, final: null }));
+      },
+      onSuccess: ({ json }) => {
+        setFeedback((prev) => ({ ...prev, final: json }));
+        onSaveHistory(data.id, { type: 'final', input: text, feedback: json, timestamp: Date.now() });
 
-## 输出格式（重要，支持流式展示）
-请忽略上文对输出格式的要求，仅按以下格式输出。
-请按两段输出：
-1) 先输出给学生看的中文 Markdown 阅卷评语（用于流式展示）。
-2) 最后一段必须输出如下包裹的 JSON（不要用 \`\`\` 包裹，不要输出任何多余字符）：
-<FINAL_JSON>
-{"score":0-20,"comment":"(与上面的 Markdown 评语保持一致，可直接复用)","strengths":["..."],"weaknesses":["..."]}
-</FINAL_JSON>`;
+        // 记录学习数据
+        const wordCount = text.split(/\s+/).filter((w) => w.trim()).length;
+        recordPractice({
+          topicId: data.id,
+          score: json.score ? json.score * 5 : 0, // 转换为100分制
+          wordCount,
+          errors: json.weaknesses || [],
+          timeSpent: 0
+        });
 
-      const res = await callAIStream(prompt, {
-        signal: controller.signal,
-        onChunk: (_chunk, fullContent) => {
-          const { displayText } = splitFinalJsonBlock(fullContent);
-          setStreaming({ type: 'scoring', id: 'final', text: displayText });
-        }
-      });
-
-      if (controller.signal.aborted || !res) return;
-      const { json, displayText } = parseJsonFromResponse(res);
-      if (!json) {
-        throw new Error('AI 返回格式解析失败，请重试');
+        // 分析错误模式
+        const errorTypes = analyzeEssayErrors(json.comment);
+        errorTypes.forEach((err) => {
+          recordErrorPattern(err.type, json.comment);
+        });
       }
-      
-      // 检查是否返回了错误
-      if (json.error || json.status === 'error') {
-        setError({ message: json.error || json.message || displayText, id: 'final', type: 'scoring' });
-        return;
-      }
-
-      setFeedback(prev => ({...prev, final: json}));
-      onSaveHistory(data.id, { type: 'final', input: text, feedback: json, timestamp: Date.now() });
-      
-      // 记录学习数据
-      const wordCount = text.split(/\s+/).filter(w => w.trim()).length;
-      recordPractice({
-        topicId: data.id,
-        score: json.score ? json.score * 5 : 0, // 转换为100分制
-        wordCount,
-        errors: json.weaknesses || [],
-        timeSpent: 0
-      });
-      
-      // 分析错误模式
-      const errorTypes = analyzeEssayErrors(json.comment);
-      errorTypes.forEach(err => {
-        recordErrorPattern(err.type, json.comment);
-      });
-    } catch(e) { 
-      if (!controller.signal.aborted) {
-        console.error('Scoring error:', e);
-        setError({ message: e?.message || '评分失败，请重试', id: 'final', type: 'scoring' });
-      }
-    }
-    if (!controller.signal.aborted) {
-      setLoading(null);
-      setStreaming({ type: null, id: null, text: '' });
-    }
-    if (abortRef.current === controller) abortRef.current = null;
+    });
   };
 
   const handleSaveRecommendedVocab = (slotId, v) => {
@@ -483,7 +383,7 @@ const EssayWorkflowManager = ({ data, onSaveVocab, onSaveError, onSaveHistory })
                 <div className="mt-4">
                   <InlineError 
                     error={error.message} 
-                    onRetry={() => { setError(null); handleLogic(slot.id); }} 
+                    onRetry={() => { clearError(); handleLogic(slot.id); }} 
                   />
                 </div>
               )}
@@ -624,7 +524,7 @@ const EssayWorkflowManager = ({ data, onSaveVocab, onSaveError, onSaveHistory })
                 <div className="mt-4">
                   <InlineError 
                     error={error.message} 
-                    onRetry={() => { setError(null); handleGrammar(slot.id); }} 
+                    onRetry={() => { clearError(); handleGrammar(slot.id); }} 
                   />
                 </div>
               )}
@@ -771,7 +671,7 @@ const EssayWorkflowManager = ({ data, onSaveVocab, onSaveError, onSaveHistory })
           {error && error.type === 'scoring' && (
             <InlineError 
               error={error.message} 
-              onRetry={() => { setError(null); handleFinal(); }} 
+              onRetry={() => { clearError(); handleFinal(); }} 
             />
           )}
           
@@ -862,33 +762,41 @@ const EssayWorkflowManager = ({ data, onSaveVocab, onSaveError, onSaveHistory })
       )}
       
       {/* 个性化学习弹窗 */}
-      <PersonalizedLearning 
-        isOpen={showLearning} 
-        onClose={() => setShowLearning(false)} 
-      />
+      {showLearning && (
+        <Suspense fallback={null}>
+          <PersonalizedLearning isOpen={showLearning} onClose={() => setShowLearning(false)} />
+        </Suspense>
+      )}
       
       {/* 高级分析弹窗 */}
-      <AdvancedAnalytics 
-        isOpen={showAnalytics} 
-        onClose={() => setShowAnalytics(false)}
-        essay={finalEssayText}
-        history={[]}
-      />
+      {showAnalytics && (
+        <Suspense fallback={null}>
+          <AdvancedAnalytics
+            isOpen={showAnalytics}
+            onClose={() => setShowAnalytics(false)}
+            essay={finalEssayText}
+            history={[]}
+          />
+        </Suspense>
+      )}
       
       {/* 写作素材库 */}
-      <WritingMaterialLibrary
-        isOpen={showMaterialLibrary}
-        onClose={() => setShowMaterialLibrary(false)}
-        onInsert={handleInsertMaterial}
-        currentTopic={data.title}
-      />
+      {showMaterialLibrary && (
+        <Suspense fallback={null}>
+          <WritingMaterialLibrary
+            isOpen={showMaterialLibrary}
+            onClose={() => setShowMaterialLibrary(false)}
+            onInsert={handleInsertMaterial}
+            currentTopic={data.title}
+          />
+        </Suspense>
+      )}
 
-      <ModelEssayModal
-        isOpen={showModelEssay}
-        onClose={() => setShowModelEssay(false)}
-        data={data}
-        mode="essay"
-      />
+      {showModelEssay && (
+        <Suspense fallback={null}>
+          <ModelEssayModal isOpen={showModelEssay} onClose={() => setShowModelEssay(false)} data={data} mode="essay" />
+        </Suspense>
+      )}
     </div>
   );
 };

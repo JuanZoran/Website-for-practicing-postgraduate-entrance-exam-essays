@@ -281,6 +281,36 @@ export const clearConversationHistory = (contextId = null) => {
   }
 };
 
+/**
+ * 清除指定前缀的所有对话历史
+ * 用于类似 `logic_${id}_${slotId}` 这种层级 contextId 的批量清理。
+ * @param {string} prefix - 前缀（例如 `logic_${topicId}`）
+ */
+export const clearConversationHistoryByPrefix = (prefix) => {
+  if (!prefix) return;
+
+  try {
+    const stored = localStorage.getItem(CONVERSATION_STORAGE_KEY);
+    if (!stored) return;
+
+    const allHistory = JSON.parse(stored);
+    let changed = false;
+
+    for (const key of Object.keys(allHistory)) {
+      if (key === prefix || key.startsWith(`${prefix}_`)) {
+        delete allHistory[key];
+        changed = true;
+      }
+    }
+
+    if (changed) {
+      localStorage.setItem(CONVERSATION_STORAGE_KEY, JSON.stringify(allHistory));
+    }
+  } catch (e) {
+    console.error('Failed to clear conversation history by prefix:', e);
+  }
+};
+
 // ==================== 提供商 API 配置 ====================
 
 /**

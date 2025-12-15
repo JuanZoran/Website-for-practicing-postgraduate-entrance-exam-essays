@@ -3,25 +3,30 @@ import {
   BookOpen, Loader, BrainCircuit, Sparkles, 
   Check, PlusCircle, RotateCcw, BarChart2, Brain, Library, CheckCircle
 } from 'lucide-react';
-import { callAI, clearConversationHistory } from "../services/aiService";
+import { callAIStream, clearConversationHistory } from "../services/aiService";
 import { buildPrompt } from "../services/promptService";
 import { FollowUpChat } from "./FollowUpChat";
 import { GrammarScoreDisplay, FinalScoreDisplay, LogicStatusDisplay } from "./ScoreDisplay";
 import SimpleMarkdown from "./SimpleMarkdown";
+import ModelEssayModal from "./ModelEssayModal";
+import { StreamingFeedbackCard } from "./StreamingText";
 import PersonalizedLearning from "./PersonalizedLearning";
 import AdvancedAnalytics from "./AdvancedAnalytics";
 import WritingMaterialLibrary from "./WritingMaterialLibrary";
 import { InlineError } from "./ErrorDisplay";
 import { recordPractice, analyzeEssayErrors, recordErrorPattern } from "../services/learningAnalyticsService";
+import { parseJsonFromResponse, splitFinalJsonBlock } from "../utils/streamingJson";
 
 const EssayWorkflowManager = ({ data, onSaveVocab, onSaveError, onSaveHistory }) => {
   const [step, setStep] = useState(0);
   const [inputs, setInputs] = useState({cn:{}, en:{}});
   const [feedback, setFeedback] = useState({cn:{}, en:{}, final:null});
   const [loading, setLoading] = useState(null);
+  const [streaming, setStreaming] = useState({ type: null, id: null, text: '' });
   const [finalEssayText, setFinalEssayText] = useState(null);
   const [initialEssayText, setInitialEssayText] = useState(null);
   const [isFullscreenEditor, setIsFullscreenEditor] = useState(false);
+  const [showModelEssay, setShowModelEssay] = useState(false);
   const [showLearning, setShowLearning] = useState(false);
   const [showAnalytics, setShowAnalytics] = useState(false);
   const [showMaterialLibrary, setShowMaterialLibrary] = useState(false);
@@ -30,14 +35,32 @@ const EssayWorkflowManager = ({ data, onSaveVocab, onSaveError, onSaveHistory })
   const [savedVocabStatus, setSavedVocabStatus] = useState({});
   const essayTextareaRef = useRef(null);
   const fullscreenTextareaRef = useRef(null);
+  const abortRef = useRef(null);
+
+  const abortOnly = () => {
+    if (abortRef.current) {
+      abortRef.current.abort();
+      abortRef.current = null;
+    }
+  };
+
+  const stopStreaming = () => {
+    abortOnly();
+    setStreaming({ type: null, id: null, text: '' });
+    setLoading(null);
+  };
+
+  useEffect(() => () => abortOnly(), []);
   
   useEffect(() => { 
+    stopStreaming();
     setStep(0); 
     setInputs({cn:{}, en:{}}); 
     setFeedback({cn:{}, en:{}, final:null}); 
     setFinalEssayText(null);
     setInitialEssayText(null);
     setSavedVocabStatus({});
+    setShowModelEssay(false);
     // 清除该题目的对话历史
     clearConversationHistory(`logic_${data.id}`);
     clearConversationHistory(`grammar_${data.id}`);
@@ -110,51 +133,119 @@ const EssayWorkflowManager = ({ data, onSaveVocab, onSaveError, onSaveHistory })
 
   const handleLogic = async (id) => {
     if (!inputs.cn[id]) return;
+    if (loading) return;
     setLoading(id);
     setError(null);
+    setFeedback(prev => ({ ...prev, cn: { ...prev.cn, [id]: null } }));
+    setStreaming({ type: 'logic', id, text: '' });
+
+    const controller = new AbortController();
+    abortRef.current = controller;
     try {
       const slotInfo = data.slots.find(s => s.id === id);
-      const prompt = buildPrompt('logic', {
+      const basePrompt = buildPrompt('logic', {
         topic: data.title,
         description: data.description,
         userInput: inputs.cn[id],
         slotType: `${slotInfo?.label || '思路'} (${getSlotTypeDescription(id)})`
       });
-      const res = await callAI(prompt || `Task: Kaoyan Logic Check. Topic: ${data.title}. User Idea: "${inputs.cn[id]}". Output JSON: { "status": "pass/warn", "comment": "Chinese feedback", "suggestion": "Improvement" }`, true);
-      const json = JSON.parse(res.replace(/```json|```/g,''));
+
+      const prompt = `${basePrompt || `Task: Kaoyan Logic Check. Topic: ${data.title}. User Idea: "${inputs.cn[id]}".`}
+
+## 输出格式（重要，支持流式展示）
+请忽略上文对输出格式的要求，仅按以下格式输出。
+请按两段输出：
+1) 先输出给学生看的中文 Markdown 反馈（可包含小标题/要点/建议），用于流式展示。
+2) 最后一段必须输出如下包裹的 JSON（不要用 \`\`\` 包裹，不要输出任何多余字符）：
+<FINAL_JSON>
+{"status":"pass/warn/fail","comment":"(与上面的 Markdown 反馈保持一致，可直接复用)","suggestion":"一句话改进建议"}
+</FINAL_JSON>`;
+
+      const res = await callAIStream(prompt, {
+        signal: controller.signal,
+        onChunk: (_chunk, fullContent) => {
+          const { displayText } = splitFinalJsonBlock(fullContent);
+          setStreaming({ type: 'logic', id, text: displayText });
+        }
+      });
+
+      if (controller.signal.aborted || !res) return;
+      const { json, displayText } = parseJsonFromResponse(res);
+      if (!json) {
+        throw new Error('AI 返回格式解析失败，请重试');
+      }
       
       // 检查是否返回了错误
       if (json.error || json.status === 'error') {
-        setError({ message: json.error || json.message, id, type: 'logic' });
+        setError({ message: json.error || json.message || displayText, id, type: 'logic' });
       } else {
         setFeedback(prev => ({...prev, cn: {...prev.cn, [id]: json}}));
         onSaveHistory(data.id, { type: 'logic', input: inputs.cn[id], feedback: json, timestamp: Date.now() });
       }
     } catch(e) { 
-      console.error('Logic check error:', e);
-      setError({ message: e.message || '审题失败，请重试', id, type: 'logic' });
+      if (!controller.signal.aborted) {
+        console.error('Logic check error:', e);
+        setError({ message: e?.message || '审题失败，请重试', id, type: 'logic' });
+      }
     }
-    setLoading(null);
+    if (!controller.signal.aborted) {
+      setLoading(null);
+      setStreaming({ type: null, id: null, text: '' });
+    }
+    if (abortRef.current === controller) abortRef.current = null;
   };
 
   const handleGrammar = async (id) => {
     if (!inputs.en[id]) return;
+    if (loading) return;
     setLoading(id);
     setError(null);
+    setFeedback(prev => ({ ...prev, en: { ...prev.en, [id]: null } }));
+    setStreaming({ type: 'grammar', id, text: '' });
+
+    const controller = new AbortController();
+    abortRef.current = controller;
     try {
-      const prompt = buildPrompt('grammar', {
+      const basePrompt = buildPrompt('grammar', {
         topic: data.title,
         description: data.description,
         chineseInput: inputs.cn[id],
         englishInput: inputs.en[id]
       });
-      const res = await callAI(prompt || `Task: Kaoyan Grammar Check. Topic: ${data.title}. CN: "${inputs.cn[id]}". EN: "${inputs.en[id]}". Output JSON: { "score": 1-10, "comment": "Chinese feedback", "grammar_issues": [], "recommended_vocab": [{ "word": "word", "meaning": "meaning", "collocation": "col", "example": "Contextual example sentence", "scenario": "Thinking context" }] }`, true);
-      const json = JSON.parse(res.replace(/```json|```/g,''));
+      const prompt = `${basePrompt || `Task: Kaoyan Grammar Check. Topic: ${data.title}. CN: "${inputs.cn[id]}". EN: "${inputs.en[id]}".`}
+
+## 输出格式（重要，支持流式展示）
+请忽略上文对输出格式的要求，仅按以下格式输出。
+请按两段输出：
+1) 先输出给学生看的中文 Markdown 总体评价与修改建议（用于流式展示）。
+2) 最后一段必须输出如下包裹的 JSON（不要用 \`\`\` 包裹，不要输出任何多余字符）：
+<FINAL_JSON>
+{
+  "score": 1-10,
+  "comment": "(与上面的 Markdown 评价保持一致，可直接复用)",
+  "grammar_issues": [{"original":"...","correction":"...","issue":"..."}],
+  "recommended_vocab": [{"word":"...","meaning":"...","collocation":"...","example":"...","scenario":"..."}],
+  "improved_version": "润色后的完整句子"
+}
+</FINAL_JSON>`;
+
+      const res = await callAIStream(prompt, {
+        signal: controller.signal,
+        onChunk: (_chunk, fullContent) => {
+          const { displayText } = splitFinalJsonBlock(fullContent);
+          setStreaming({ type: 'grammar', id, text: displayText });
+        }
+      });
+
+      if (controller.signal.aborted || !res) return;
+      const { json, displayText } = parseJsonFromResponse(res);
+      if (!json) {
+        throw new Error('AI 返回格式解析失败，请重试');
+      }
       
       // 检查是否返回了错误
       if (json.error || json.status === 'error') {
-        setError({ message: json.error || json.message, id, type: 'grammar' });
-        setLoading(null);
+        setError({ message: json.error || json.message || displayText, id, type: 'grammar' });
         return;
       }
       
@@ -162,10 +253,16 @@ const EssayWorkflowManager = ({ data, onSaveVocab, onSaveError, onSaveHistory })
       onSaveHistory(data.id, { type: 'grammar', input: inputs.en[id], feedback: json, timestamp: Date.now() });
       if (json.grammar_issues?.length) json.grammar_issues.forEach(err => onSaveError({...err, timestamp: Date.now()}));
     } catch(e) { 
-      console.error('Grammar check error:', e);
-      setError({ message: e.message || '润色失败，请重试', id, type: 'grammar' });
+      if (!controller.signal.aborted) {
+        console.error('Grammar check error:', e);
+        setError({ message: e?.message || '润色失败，请重试', id, type: 'grammar' });
+      }
     }
-    setLoading(null);
+    if (!controller.signal.aborted) {
+      setLoading(null);
+      setStreaming({ type: null, id: null, text: '' });
+    }
+    if (abortRef.current === controller) abortRef.current = null;
   };
 
   const generateEssayText = () => {
@@ -181,25 +278,52 @@ const EssayWorkflowManager = ({ data, onSaveVocab, onSaveError, onSaveHistory })
   };
 
   const handleFinal = async () => {
+    if (loading) return;
     setLoading('final');
     setError(null);
+    setFeedback(prev => ({ ...prev, final: null }));
+    setStreaming({ type: 'scoring', id: 'final', text: '' });
     const text = finalEssayText || generateEssayText();
+
+    const controller = new AbortController();
+    abortRef.current = controller;
     try {
-      const prompt = buildPrompt('scoring', {
+      const basePrompt = buildPrompt('scoring', {
         topic: data.title,
         description: data.description,
         essay: text
       });
-      const res = await callAI(prompt || `Task: Grade Essay (20pts). Topic: ${data.title}. Text: ${text}. Output JSON: { "score": number, "comment": "Chinese feedback", "strengths": [], "weaknesses": [] }`, true);
-      const json = JSON.parse(res.replace(/```json|```/g,'').trim());
+      const prompt = `${basePrompt || `Task: Grade Essay (20pts). Topic: ${data.title}. Text: ${text}.`}
+
+## 输出格式（重要，支持流式展示）
+请忽略上文对输出格式的要求，仅按以下格式输出。
+请按两段输出：
+1) 先输出给学生看的中文 Markdown 阅卷评语（用于流式展示）。
+2) 最后一段必须输出如下包裹的 JSON（不要用 \`\`\` 包裹，不要输出任何多余字符）：
+<FINAL_JSON>
+{"score":0-20,"comment":"(与上面的 Markdown 评语保持一致，可直接复用)","strengths":["..."],"weaknesses":["..."]}
+</FINAL_JSON>`;
+
+      const res = await callAIStream(prompt, {
+        signal: controller.signal,
+        onChunk: (_chunk, fullContent) => {
+          const { displayText } = splitFinalJsonBlock(fullContent);
+          setStreaming({ type: 'scoring', id: 'final', text: displayText });
+        }
+      });
+
+      if (controller.signal.aborted || !res) return;
+      const { json, displayText } = parseJsonFromResponse(res);
+      if (!json) {
+        throw new Error('AI 返回格式解析失败，请重试');
+      }
       
       // 检查是否返回了错误
       if (json.error || json.status === 'error') {
-        setError({ message: json.error || json.message, id: 'final', type: 'scoring' });
-        setLoading(null);
+        setError({ message: json.error || json.message || displayText, id: 'final', type: 'scoring' });
         return;
       }
-      
+
       setFeedback(prev => ({...prev, final: json}));
       onSaveHistory(data.id, { type: 'final', input: text, feedback: json, timestamp: Date.now() });
       
@@ -219,10 +343,16 @@ const EssayWorkflowManager = ({ data, onSaveVocab, onSaveError, onSaveHistory })
         recordErrorPattern(err.type, json.comment);
       });
     } catch(e) { 
-      console.error('Scoring error:', e);
-      setError({ message: e.message || '评分失败，请重试', id: 'final', type: 'scoring' });
+      if (!controller.signal.aborted) {
+        console.error('Scoring error:', e);
+        setError({ message: e?.message || '评分失败，请重试', id: 'final', type: 'scoring' });
+      }
     }
-    setLoading(null);
+    if (!controller.signal.aborted) {
+      setLoading(null);
+      setStreaming({ type: null, id: null, text: '' });
+    }
+    if (abortRef.current === controller) abortRef.current = null;
   };
 
   const handleSaveRecommendedVocab = (slotId, v) => {
@@ -258,6 +388,17 @@ const EssayWorkflowManager = ({ data, onSaveVocab, onSaveError, onSaveHistory })
 
   return (
     <div>
+      <div className="flex justify-end mb-3">
+        <button
+          type="button"
+          onClick={() => setShowModelEssay(true)}
+          className="px-3 py-2 rounded-2xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 text-slate-700 dark:text-slate-200 text-sm font-medium flex items-center gap-2 hover:bg-slate-50 dark:hover:bg-slate-800 transition-colors"
+        >
+          <BookOpen className="w-4 h-4 text-indigo-600 dark:text-indigo-400" />
+          <span>查看范文</span>
+        </button>
+      </div>
+
       {/* 步骤指示器 - 乔布斯极简风格 - 更紧凑 */}
       <div className="flex justify-center items-center gap-3 mb-6 py-1">
         {["思考", "翻译", "成文"].map((t, i) => (
@@ -292,6 +433,19 @@ const EssayWorkflowManager = ({ data, onSaveVocab, onSaveError, onSaveHistory })
                 value={inputs.cn[slot.id]||''} 
                 onChange={e => setInputs(p => ({...p, cn: {...p.cn, [slot.id]: e.target.value}}))} 
               />
+
+              {loading === slot.id && streaming.type === 'logic' && streaming.id === slot.id && (
+                <div className="mt-4">
+                  <StreamingFeedbackCard
+                    title="AI 审题中..."
+                    content={streaming.text}
+                    isStreaming={true}
+                    onCancel={stopStreaming}
+                    type="info"
+                    icon={BrainCircuit}
+                  />
+                </div>
+              )}
               {/* 反馈显示 */}
               {feedback.cn[slot.id] && (
                 <div className="mt-4 space-y-3">
@@ -335,15 +489,15 @@ const EssayWorkflowManager = ({ data, onSaveVocab, onSaveError, onSaveHistory })
               )}
               <button 
                 onClick={() => handleLogic(slot.id)} 
-                disabled={loading===slot.id} 
+                disabled={loading !== null} 
                 className="mt-4 w-full py-3.5 bg-slate-100 dark:bg-slate-700 text-slate-700 dark:text-slate-200 rounded-2xl font-medium flex items-center justify-center gap-2 active:scale-[0.98] transition-transform"
               >
-                {loading===slot.id ? <Loader className="w-4 h-4 animate-spin"/> : <BrainCircuit className="w-4 h-4"/>}
+                {loading === slot.id ? <Loader className="w-4 h-4 animate-spin"/> : <BrainCircuit className="w-4 h-4"/>}
                 <span>AI 审题</span>
               </button>
             </div>
           ))}
-          <button onClick={() => setStep(1)} className="btn-primary">
+          <button onClick={() => setStep(1)} className="btn-primary" disabled={loading !== null}>
             继续
           </button>
         </div>
@@ -378,6 +532,19 @@ const EssayWorkflowManager = ({ data, onSaveVocab, onSaveError, onSaveHistory })
                 onChange={e => setInputs(p => ({...p, en: {...p.en, [slot.id]: e.target.value}}))}
                 onFocus={() => setActiveInputField(slot.id)}
               />
+
+              {loading === slot.id && streaming.type === 'grammar' && streaming.id === slot.id && (
+                <div className="mt-4">
+                  <StreamingFeedbackCard
+                    title="AI 润色中..."
+                    content={streaming.text}
+                    isStreaming={true}
+                    onCancel={stopStreaming}
+                    type="info"
+                    icon={Sparkles}
+                  />
+                </div>
+              )}
               {/* 反馈显示 */}
               {feedback.en[slot.id] && (
                 <div className="mt-4 space-y-3">
@@ -463,17 +630,17 @@ const EssayWorkflowManager = ({ data, onSaveVocab, onSaveError, onSaveHistory })
               )}
               <button 
                 onClick={() => handleGrammar(slot.id)} 
-                disabled={loading===slot.id} 
+                disabled={loading !== null} 
                 className="mt-4 w-full py-3.5 bg-purple-100 dark:bg-purple-900/30 text-purple-700 dark:text-purple-300 rounded-2xl font-medium flex items-center justify-center gap-2 active:scale-[0.98] transition-transform"
               >
-                {loading===slot.id ? <Loader className="w-4 h-4 animate-spin"/> : <Sparkles className="w-4 h-4"/>}
+                {loading === slot.id ? <Loader className="w-4 h-4 animate-spin"/> : <Sparkles className="w-4 h-4"/>}
                 <span>AI 润色</span>
               </button>
             </div>
           ))}
           <div className="flex gap-3">
-            <button onClick={() => setStep(0)} className="btn-secondary flex-1">返回</button>
-            <button onClick={() => setStep(2)} className="btn-primary flex-[2]">继续</button>
+            <button onClick={() => setStep(0)} className="btn-secondary flex-1" disabled={loading !== null}>返回</button>
+            <button onClick={() => setStep(2)} className="btn-primary flex-[2]" disabled={loading !== null}>继续</button>
           </div>
         </div>
       )}
@@ -580,12 +747,25 @@ const EssayWorkflowManager = ({ data, onSaveVocab, onSaveError, onSaveHistory })
           {/* 评分按钮 */}
           <button 
             onClick={handleFinal} 
-            disabled={loading==='final'} 
+            disabled={loading !== null} 
             className="w-full py-4 bg-green-600 text-white rounded-2xl font-semibold text-[17px] flex justify-center items-center gap-2 active:scale-[0.98] transition-transform shadow-lg shadow-green-200 dark:shadow-green-900/30"
           >
             {loading==='final' ? <Loader className="w-5 h-5 animate-spin"/> : <BookOpen className="w-5 h-5"/>}
             <span>提交阅卷</span>
           </button>
+
+          {loading === 'final' && streaming.type === 'scoring' && streaming.id === 'final' && (
+            <div className="mt-4">
+              <StreamingFeedbackCard
+                title="阅卷中..."
+                content={streaming.text}
+                isStreaming={true}
+                onCancel={stopStreaming}
+                type="info"
+                icon={BookOpen}
+              />
+            </div>
+          )}
           
           {/* 错误显示 */}
           {error && error.type === 'scoring' && (
@@ -701,6 +881,13 @@ const EssayWorkflowManager = ({ data, onSaveVocab, onSaveError, onSaveHistory })
         onClose={() => setShowMaterialLibrary(false)}
         onInsert={handleInsertMaterial}
         currentTopic={data.title}
+      />
+
+      <ModelEssayModal
+        isOpen={showModelEssay}
+        onClose={() => setShowModelEssay(false)}
+        data={data}
+        mode="essay"
       />
     </div>
   );

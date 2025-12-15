@@ -3,22 +3,27 @@ import {
   BookOpen, Loader, BrainCircuit, Sparkles, 
   Check, PlusCircle, RotateCcw, CheckSquare, FileText, AlertCircle
 } from 'lucide-react';
-import { callAI, clearConversationHistory } from "../services/aiService";
+import { callAIStream, clearConversationHistory } from "../services/aiService";
 import { buildLetterPrompt, getLetterTypeName, getLetterTypeIcon, checkFormat } from "../services/letterPromptService";
 import { LETTER_TYPES } from "../data/letterData";
 import { FollowUpChat } from "./FollowUpChat";
 import { GrammarScoreDisplay, LogicStatusDisplay } from "./ScoreDisplay";
 import SimpleMarkdown from "./SimpleMarkdown";
+import ModelEssayModal from "./ModelEssayModal";
 import { InlineError } from "./ErrorDisplay";
+import { StreamingFeedbackCard } from "./StreamingText";
+import { parseJsonFromResponse, splitFinalJsonBlock } from "../utils/streamingJson";
 
 const LetterWorkflowManager = ({ data, onSaveVocab, onSaveError, onSaveHistory }) => {
   const [step, setStep] = useState(0);
   const [inputs, setInputs] = useState({});
   const [feedback, setFeedback] = useState({});
   const [loading, setLoading] = useState(null);
+  const [streaming, setStreaming] = useState({ type: null, id: null, text: '' });
   const [finalLetterText, setFinalLetterText] = useState(null);
   const [initialLetterText, setInitialLetterText] = useState(null);
   const [isFullscreenEditor, setIsFullscreenEditor] = useState(false);
+  const [showModelEssay, setShowModelEssay] = useState(false);
   const [error, setError] = useState(null);
   const [savedTipStatus, setSavedTipStatus] = useState({});
   const [formatChecks, setFormatChecks] = useState({ salutation: 'warn', signOff: 'warn', punctuation: 'warn' });
@@ -31,11 +36,28 @@ const LetterWorkflowManager = ({ data, onSaveVocab, onSaveError, onSaveHistory }
   });
   const letterTextareaRef = useRef(null);
   const fullscreenTextareaRef = useRef(null);
+  const abortRef = useRef(null);
+
+  const abortOnly = () => {
+    if (abortRef.current) {
+      abortRef.current.abort();
+      abortRef.current = null;
+    }
+  };
+
+  const stopStreaming = () => {
+    abortOnly();
+    setStreaming({ type: null, id: null, text: '' });
+    setLoading(null);
+  };
+
+  useEffect(() => () => abortOnly(), []);
 
   const letterType = data.type || 'suggestion';
   const letterTypeInfo = LETTER_TYPES[letterType] || {};
 
   useEffect(() => {
+    stopStreaming();
     setStep(0);
     setInputs({});
     setFeedback({});
@@ -43,6 +65,7 @@ const LetterWorkflowManager = ({ data, onSaveVocab, onSaveError, onSaveHistory }
     setInitialLetterText(null);
     setError(null);
     setSavedTipStatus({});
+    setShowModelEssay(false);
     setChecklist({ tense: false, agreement: false, spelling: false, signOff: false, points: false });
     clearConversationHistory(`letter_logic_${data.id}`);
     clearConversationHistory(`letter_polish_${data.id}`);
@@ -76,11 +99,17 @@ const LetterWorkflowManager = ({ data, onSaveVocab, onSaveError, onSaveHistory }
 
   const handleLogicCheck = async (id) => {
     if (!inputs[id]) return;
+    if (loading) return;
     setLoading(id);
     setError(null);
+    setFeedback(prev => ({ ...prev, [id]: null }));
+    setStreaming({ type: 'logic', id, text: '' });
+
+    const controller = new AbortController();
+    abortRef.current = controller;
     try {
       const slotInfo = data.slots.find(s => s.id === id);
-      const prompt = buildLetterPrompt('letter_logic', {
+      const basePrompt = buildLetterPrompt('letter_logic', {
         letterType: data.type,
         register: data.register,
         scenario: data.scenario,
@@ -89,20 +118,48 @@ const LetterWorkflowManager = ({ data, onSaveVocab, onSaveError, onSaveHistory }
         slotQuestion: slotInfo?.question,
         userInput: inputs[id]
       });
-      const res = await callAI(prompt, true);
-      const json = JSON.parse(res.replace(/```json|```/g, ''));
+      const prompt = `${basePrompt || ''}
+
+## 输出格式（重要，支持流式展示）
+请忽略上文对输出格式的要求，仅按以下格式输出。
+请按两段输出：
+1) 先输出给学生看的中文 Markdown 反馈（用于流式展示）。
+2) 最后一段必须输出如下包裹的 JSON（不要用 \`\`\` 包裹，不要输出任何多余字符）：
+<FINAL_JSON>
+{ "status":"pass/warn/fail", "score":1-10, "comment":"(与上面的 Markdown 反馈保持一致，可直接复用)", "suggestion":"具体改进建议", "format_hints":[], "content_check":{ "covered":[], "missing":[] }, "vocab_tips":[] }
+</FINAL_JSON>`;
+
+      const res = await callAIStream(prompt, {
+        signal: controller.signal,
+        onChunk: (_chunk, fullContent) => {
+          const { displayText } = splitFinalJsonBlock(fullContent);
+          setStreaming({ type: 'logic', id, text: displayText });
+        }
+      });
+
+      if (controller.signal.aborted || !res) return;
+      const { json, displayText } = parseJsonFromResponse(res);
+      if (!json) {
+        throw new Error('AI 返回格式解析失败，请重试');
+      }
       
       if (json.error || json.status === 'error') {
-        setError({ message: json.error || json.message, id, type: 'logic' });
+        setError({ message: json.error || json.message || displayText, id, type: 'logic' });
       } else {
         setFeedback(prev => ({ ...prev, [id]: json }));
         onSaveHistory(data.id, { type: 'letter_logic', input: inputs[id], feedback: json, timestamp: Date.now() });
       }
     } catch (e) {
-      console.error('Letter logic check error:', e);
-      setError({ message: e.message || '审题失败，请重试', id, type: 'logic' });
+      if (!controller.signal.aborted) {
+        console.error('Letter logic check error:', e);
+        setError({ message: e?.message || '审题失败，请重试', id, type: 'logic' });
+      }
     }
-    setLoading(null);
+    if (!controller.signal.aborted) {
+      setLoading(null);
+      setStreaming({ type: null, id: null, text: '' });
+    }
+    if (abortRef.current === controller) abortRef.current = null;
   };
 
   const handleResetLetter = () => {
@@ -112,33 +169,66 @@ const LetterWorkflowManager = ({ data, onSaveVocab, onSaveError, onSaveHistory }
   };
 
   const handleFinalScoring = async () => {
+    if (loading) return;
     setLoading('final');
     setError(null);
     const text = finalLetterText || generateLetterText();
+    setFeedback(prev => ({ ...prev, final: null }));
+    setStreaming({ type: 'scoring', id: 'final', text: '' });
+
+    const controller = new AbortController();
+    abortRef.current = controller;
     try {
-      const prompt = buildLetterPrompt('letter_scoring', {
+      const basePrompt = buildLetterPrompt('letter_scoring', {
         letterType: data.type,
         register: data.register,
         scenario: data.scenario,
         requirements: data.requirements,
         essay: text
       });
-      const res = await callAI(prompt, true);
-      const json = JSON.parse(res.replace(/```json|```/g, '').trim());
+      const prompt = `${basePrompt || ''}
+
+## 输出格式（重要，支持流式展示）
+请忽略上文对输出格式的要求，仅按以下格式输出。
+请按两段输出：
+1) 先输出给学生看的中文 Markdown 阅卷评语（用于流式展示）。
+2) 最后一段必须输出如下包裹的 JSON（不要用 \`\`\` 包裹，不要输出任何多余字符）：
+<FINAL_JSON>
+{ "score":0-10, "level":"第X档", "comment":"(与上面的 Markdown 评语保持一致，可直接复用)", "dimensions":{}, "format_check":{ "salutation":"pass/warn/fail", "signOff":"pass/warn/fail", "punctuation":"pass/warn/fail", "issues":[] }, "strengths":[], "weaknesses":[], "improved_version":"改进后的范文", "checklist_reminder":[] }
+</FINAL_JSON>`;
+
+      const res = await callAIStream(prompt, {
+        signal: controller.signal,
+        onChunk: (_chunk, fullContent) => {
+          const { displayText } = splitFinalJsonBlock(fullContent);
+          setStreaming({ type: 'scoring', id: 'final', text: displayText });
+        }
+      });
+
+      if (controller.signal.aborted || !res) return;
+      const { json, displayText } = parseJsonFromResponse(res);
+      if (!json) {
+        throw new Error('AI 返回格式解析失败，请重试');
+      }
       
       if (json.error || json.status === 'error') {
-        setError({ message: json.error || json.message, id: 'final', type: 'scoring' });
-        setLoading(null);
+        setError({ message: json.error || json.message || displayText, id: 'final', type: 'scoring' });
         return;
       }
 
       setFeedback(prev => ({ ...prev, final: json }));
       onSaveHistory(data.id, { type: 'letter_final', input: text, feedback: json, timestamp: Date.now() });
     } catch (e) {
-      console.error('Letter scoring error:', e);
-      setError({ message: e.message || '评分失败，请重试', id: 'final', type: 'scoring' });
+      if (!controller.signal.aborted) {
+        console.error('Letter scoring error:', e);
+        setError({ message: e?.message || '评分失败，请重试', id: 'final', type: 'scoring' });
+      }
     }
-    setLoading(null);
+    if (!controller.signal.aborted) {
+      setLoading(null);
+      setStreaming({ type: null, id: null, text: '' });
+    }
+    if (abortRef.current === controller) abortRef.current = null;
   };
 
   const getFormatCheckIcon = (status) => {
@@ -149,6 +239,17 @@ const LetterWorkflowManager = ({ data, onSaveVocab, onSaveError, onSaveHistory }
 
   return (
     <div>
+      <div className="flex justify-end mb-3">
+        <button
+          type="button"
+          onClick={() => setShowModelEssay(true)}
+          className="px-3 py-2 rounded-2xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 text-slate-700 dark:text-slate-200 text-sm font-medium flex items-center gap-2 hover:bg-slate-50 dark:hover:bg-slate-800 transition-colors"
+        >
+          <BookOpen className="w-4 h-4 text-teal-600 dark:text-teal-400" />
+          <span>查看范文</span>
+        </button>
+      </div>
+
       <div className="flex justify-center items-center gap-3 mb-8 py-2">
         {["填写框架", "成文评分"].map((t, i) => (
           <div key={i} className="flex items-center gap-3">
@@ -220,6 +321,19 @@ const LetterWorkflowManager = ({ data, onSaveVocab, onSaveError, onSaveHistory }
                 value={inputs[slot.id] || ''}
                 onChange={e => setInputs(p => ({ ...p, [slot.id]: e.target.value }))}
               />
+
+              {loading === slot.id && streaming.type === 'logic' && streaming.id === slot.id && (
+                <div className="mt-4">
+                  <StreamingFeedbackCard
+                    title="AI 审题中..."
+                    content={streaming.text}
+                    isStreaming={true}
+                    onCancel={stopStreaming}
+                    type="info"
+                    icon={BrainCircuit}
+                  />
+                </div>
+              )}
               
               {feedback[slot.id] && (
                 <div className="mt-4 space-y-3">
@@ -308,7 +422,7 @@ const LetterWorkflowManager = ({ data, onSaveVocab, onSaveError, onSaveHistory }
 
               <button
                 onClick={() => handleLogicCheck(slot.id)}
-                disabled={loading === slot.id}
+                disabled={loading !== null}
                 className="mt-4 w-full py-3.5 bg-slate-100 dark:bg-slate-700 text-slate-700 dark:text-slate-200 rounded-2xl font-medium flex items-center justify-center gap-2 active:scale-[0.98] transition-transform"
               >
                 {loading === slot.id ? <Loader className="w-4 h-4 animate-spin" /> : <BrainCircuit className="w-4 h-4" />}
@@ -317,7 +431,7 @@ const LetterWorkflowManager = ({ data, onSaveVocab, onSaveError, onSaveHistory }
             </div>
           ))}
 
-          <button onClick={() => setStep(1)} className="btn-primary bg-teal-600 hover:bg-teal-700 shadow-teal-200 dark:shadow-teal-900/30">
+          <button onClick={() => setStep(1)} className="btn-primary bg-teal-600 hover:bg-teal-700 shadow-teal-200 dark:shadow-teal-900/30" disabled={loading !== null}>
             继续写作
           </button>
         </div>
@@ -449,12 +563,25 @@ const LetterWorkflowManager = ({ data, onSaveVocab, onSaveError, onSaveHistory }
 
           <button
             onClick={handleFinalScoring}
-            disabled={loading === 'final'}
+            disabled={loading !== null}
             className="w-full py-4 bg-teal-600 text-white rounded-2xl font-semibold text-[17px] flex justify-center items-center gap-2 active:scale-[0.98] transition-transform shadow-lg shadow-teal-200 dark:shadow-teal-900/30"
           >
             {loading === 'final' ? <Loader className="w-5 h-5 animate-spin" /> : <BookOpen className="w-5 h-5" />}
             <span>提交阅卷</span>
           </button>
+
+          {loading === 'final' && streaming.type === 'scoring' && streaming.id === 'final' && (
+            <div className="mt-4">
+              <StreamingFeedbackCard
+                title="阅卷中..."
+                content={streaming.text}
+                isStreaming={true}
+                onCancel={stopStreaming}
+                type="info"
+                icon={BookOpen}
+              />
+            </div>
+          )}
 
           {error && error.type === 'scoring' && (
             <InlineError 
@@ -573,6 +700,13 @@ const LetterWorkflowManager = ({ data, onSaveVocab, onSaveError, onSaveHistory }
           </button>
         </div>
       )}
+
+      <ModelEssayModal
+        isOpen={showModelEssay}
+        onClose={() => setShowModelEssay(false)}
+        data={data}
+        mode="letter"
+      />
     </div>
   );
 };

@@ -4,6 +4,9 @@ import { ChatList } from './StreamingText';
 import { InlineError } from './ErrorDisplay';
 import { useAIChat } from '../hooks/useAIChat';
 import { getBuiltInEssayModel, getBuiltInLetterModel } from '../services/modelTextService';
+import { useIsMobile } from '../hooks/useMobile';
+import SelectionToolbar from './SelectionToolbar';
+import BottomDrawer from './BottomDrawer';
 
 const ModelEssayModal = ({ isOpen, onClose, data, mode = 'essay' }) => {
   const contentRef = useRef(null);
@@ -14,6 +17,9 @@ const ModelEssayModal = ({ isOpen, onClose, data, mode = 'essay' }) => {
   const [structureOpen, setStructureOpen] = useState(true);
   const [highlight, setHighlight] = useState(null);
   const [mobileTab, setMobileTab] = useState('content');
+  const [showSelectionToolbar, setShowSelectionToolbar] = useState(false);
+  const [showBottomDrawer, setShowBottomDrawer] = useState(false);
+  const isMobile = useIsMobile();
 
   const modelView = useMemo(() => {
     if (!data) return mode === 'letter' ? getBuiltInLetterModel(null) : getBuiltInEssayModel(null);
@@ -164,6 +170,7 @@ const ModelEssayModal = ({ isOpen, onClose, data, mode = 'essay' }) => {
     const selection = window.getSelection?.();
     if (!selection || selection.isCollapsed) {
       setSelectedText('');
+      setShowSelectionToolbar(false);
       return;
     }
 
@@ -172,17 +179,27 @@ const ModelEssayModal = ({ isOpen, onClose, data, mode = 'essay' }) => {
     const container = contentRef.current;
     if (!container || !anchorNode || !focusNode) {
       setSelectedText('');
+      setShowSelectionToolbar(false);
       return;
     }
 
     if (!container.contains(anchorNode) || !container.contains(focusNode)) {
       setSelectedText('');
+      setShowSelectionToolbar(false);
       return;
     }
 
     const text = selection.toString().trim();
-    setSelectedText(text.slice(0, 800));
-  }, [isOpen]);
+    if (text) {
+      setSelectedText(text.slice(0, 800));
+      if (isMobile) {
+        setShowSelectionToolbar(true);
+      }
+    } else {
+      setSelectedText('');
+      setShowSelectionToolbar(false);
+    }
+  }, [isOpen, isMobile]);
 
   const scheduleSelectionUpdate = useCallback(() => {
     if (!isOpen) return;
@@ -208,6 +225,8 @@ const ModelEssayModal = ({ isOpen, onClose, data, mode = 'essay' }) => {
     setStructureOpen(true);
     setHighlight(null);
     setMobileTab('content');
+    setShowSelectionToolbar(false);
+    setShowBottomDrawer(false);
   }, [isOpen, data?.id]);
 
   useEffect(() => {
@@ -308,6 +327,16 @@ ${question}`;
     if (tab === 'ask') setAskOpen(true);
   };
 
+  const handleOpenDrawer = () => {
+    setShowSelectionToolbar(false);
+    setShowBottomDrawer(true);
+  };
+
+  const handleQuickQuestion = (question) => {
+    setShowSelectionToolbar(false);
+    setShowBottomDrawer(true);
+  };
+
   return (
     <>
       <div
@@ -351,62 +380,55 @@ ${question}`;
             </div>
           </div>
 
-          <div className="p-4 md:p-5 flex-1 overflow-hidden min-h-0 flex flex-col gap-4 md:grid md:grid-cols-[280px_1fr] md:grid-rows-[1fr_auto] md:gap-4">
-            <div className="md:hidden">
-              <div className="p-1 rounded-2xl bg-slate-100 dark:bg-slate-800 flex items-center gap-1">
-                <button
-                  type="button"
-                  onClick={() => setTab('content')}
-                  className={`flex-1 py-2 rounded-xl text-sm font-medium transition-colors ${
-                    mobileTab === 'content'
-                      ? 'bg-white dark:bg-slate-900 text-slate-800 dark:text-slate-100 shadow-sm'
-                      : 'text-slate-500 dark:text-slate-400'
-                  }`}
-                >
-                  范文
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setTab('structure')}
-                  className={`flex-1 py-2 rounded-xl text-sm font-medium transition-colors ${
-                    mobileTab === 'structure'
-                      ? 'bg-white dark:bg-slate-900 text-slate-800 dark:text-slate-100 shadow-sm'
-                      : 'text-slate-500 dark:text-slate-400'
-                  }`}
-                >
-                  结构
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setTab('ask')}
-                  className={`flex-1 py-2 rounded-xl text-sm font-medium transition-colors ${
-                    mobileTab === 'ask'
-                      ? 'bg-white dark:bg-slate-900 text-slate-800 dark:text-slate-100 shadow-sm'
-                      : 'text-slate-500 dark:text-slate-400'
-                  }`}
-                >
-                  <span className="inline-flex items-center justify-center gap-1">
-                    问 AI
-                    {selectedText && mobileTab !== 'ask' && (
-                      <span className={`w-1.5 h-1.5 rounded-full ${styles.accentDot}`} />
-                    )}
-                  </span>
-                </button>
-              </div>
+            <div className="p-4 md:p-5 flex-1 overflow-hidden min-h-0 flex flex-col gap-4 md:grid md:grid-cols-[280px_1fr] md:grid-rows-[1fr_auto] md:gap-4">
+              <div className="md:hidden">
+                <div className="p-1 rounded-2xl bg-slate-100 dark:bg-slate-800 flex items-center gap-1">
+                  <button
+                    type="button"
+                    onClick={() => setTab('content')}
+                    className={`flex-1 py-2 rounded-xl text-sm font-medium transition-colors ${
+                      mobileTab === 'content'
+                        ? 'bg-white dark:bg-slate-900 text-slate-800 dark:text-slate-100 shadow-sm'
+                        : 'text-slate-500 dark:text-slate-400'
+                    }`}
+                  >
+                    范文
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setTab('structure')}
+                    className={`flex-1 py-2 rounded-xl text-sm font-medium transition-colors ${
+                      mobileTab === 'structure'
+                        ? 'bg-white dark:bg-slate-900 text-slate-800 dark:text-slate-100 shadow-sm'
+                        : 'text-slate-500 dark:text-slate-400'
+                    }`}
+                  >
+                    结构
+                  </button>
+                </div>
 
-              {selectedText && mobileTab === 'content' && (
-                <button
-                  type="button"
-                  onClick={() => setTab('ask')}
-                  className="mt-3 w-full px-4 py-3 rounded-2xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 text-left active:scale-[0.99] transition-transform"
-                  title="针对选中片段提问"
-                >
-                  <div className="text-xs text-slate-400 mb-1">已选中片段</div>
-                  <div className="text-sm text-slate-700 dark:text-slate-200 truncate">{selectedText}</div>
-                  <div className={`mt-2 text-sm font-medium ${styles.accentText}`}>去问 AI →</div>
-                </button>
-              )}
-            </div>
+                {mobileTab === 'content' && (
+                  <div className="mt-3 flex items-center gap-2">
+                    <button
+                      type="button"
+                      onClick={handleOpenDrawer}
+                      className={`flex-1 px-4 py-3 rounded-2xl ${styles.accentButton} flex items-center justify-center gap-2 active:scale-[0.98] transition-transform`}
+                    >
+                      <MessageCircle className="w-4 h-4" />
+                      <span>问 AI</span>
+                      {selectedText && (
+                        <span className="w-1.5 h-1.5 rounded-full bg-white/80" />
+                      )}
+                    </button>
+                    {selectedText && (
+                      <div className="flex-1 px-3 py-2 rounded-xl bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700">
+                        <div className="text-[10px] text-slate-400 uppercase tracking-wide">已选中</div>
+                        <div className="text-xs text-slate-600 dark:text-slate-300 truncate mt-0.5">{selectedText}</div>
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
 
             <div
               className={`${mobileTab === 'structure' ? 'flex flex-col flex-1 min-h-0' : 'hidden'} md:flex md:flex-col rounded-2xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 overflow-hidden md:row-span-2 md:min-h-0`}
@@ -622,9 +644,9 @@ ${question}`;
               </div>
             </div>
 
-            <div
-              className={`${mobileTab === 'ask' ? 'flex flex-col flex-1 min-h-0' : 'hidden'} md:block p-4 pb-safe rounded-2xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900`}
-            >
+              <div
+                className="hidden md:block p-4 pb-safe rounded-2xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900"
+              >
               <div className="flex items-center justify-between gap-3">
                 <div className="flex items-center gap-2 min-w-0">
                   <MessageCircle className={`w-5 h-5 ${styles.accentIcon}`} />
@@ -656,17 +678,17 @@ ${question}`;
                 </div>
               </div>
 
-              {askOpen && (
-                <div className={`mt-4 ${mobileTab === 'ask' ? 'flex-1 min-h-0 flex flex-col gap-3' : 'space-y-3'}`}>
+                {askOpen && (
+                  <div className="mt-4 space-y-3">
                   {error && (
                     <InlineError error={error} onRetry={handleAsk} />
                   )}
 
                   {(messages.length > 0 || isStreaming) && (
-                    <div className={`${mobileTab === 'ask' ? 'flex-1 min-h-0 overflow-y-auto custom-scrollbar' : 'max-h-[240px] overflow-y-auto custom-scrollbar'}`}>
-                      <ChatList messages={messages} streamingContent={streamingContent} isStreaming={isStreaming} />
-                    </div>
-                  )}
+                      <div className="max-h-[240px] overflow-y-auto custom-scrollbar">
+                        <ChatList messages={messages} streamingContent={streamingContent} isStreaming={isStreaming} />
+                      </div>
+                    )}
 
                   <div className="flex items-end gap-2">
                     <textarea
@@ -705,13 +727,34 @@ ${question}`;
                     )}
                   </div>
                 </div>
-              )}
+                )}
+              </div>
             </div>
           </div>
         </div>
-      </div>
-    </>
-  );
+
+        {isMobile && (
+          <>
+            <SelectionToolbar
+              containerRef={contentRef}
+              onAskAI={handleOpenDrawer}
+              onQuickQuestion={handleQuickQuestion}
+              isVisible={showSelectionToolbar}
+              selectedText={selectedText}
+            />
+            <BottomDrawer
+              isOpen={showBottomDrawer}
+              onClose={() => setShowBottomDrawer(false)}
+              selectedText={selectedText}
+              contextId={askContextId}
+              mode={mode}
+              data={data}
+              modelText={modelView.text}
+            />
+          </>
+        )}
+      </>
+    );
 };
 
 export default ModelEssayModal;

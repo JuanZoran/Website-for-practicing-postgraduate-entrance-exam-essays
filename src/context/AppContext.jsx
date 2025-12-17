@@ -187,6 +187,14 @@ export function AppProvider({ children }) {
 
   const toggleDark = useCallback(() => setDark(d => !d), []);
 
+  useEffect(() => {
+    if (dark) {
+      document.documentElement.classList.add('dark');
+    } else {
+      document.documentElement.classList.remove('dark');
+    }
+  }, [dark]);
+
   const handleExportData = useCallback(() => {
     const dataStr = JSON.stringify({ savedVocab: vocab, savedErrors: errors }, null, 2);
     const blob = new Blob([dataStr], { type: "application/json" });

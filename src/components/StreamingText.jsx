@@ -1,10 +1,6 @@
-/**
- * 流式文本显示组件
- * 实时显示AI生成的内容，带打字机效果
- */
-
-import { useState, useEffect, useRef } from 'react';
+import { useEffect, useRef } from 'react';
 import { Loader, StopCircle } from 'lucide-react';
+import Markdown from 'react-markdown';
 
 /**
  * 流式文本显示
@@ -102,67 +98,27 @@ export const StreamingFeedbackCard = ({
   );
 };
 
-/**
- * 格式化聊天内容，增加颜色区分
- */
-const formatChatContent = (text, isUser) => {
-  if (!text || isUser) return text;
-  
-  const elements = [];
-  let lastIndex = 0;
-  const matches = [];
-  
-  // 匹配粗体 **text**
-  const boldRegex = /\*\*(.+?)\*\*/g;
-  let match;
-  while ((match = boldRegex.exec(text)) !== null) {
-    matches.push({ start: match.index, end: match.index + match[0].length, content: match[1], type: 'bold' });
-  }
-  
-  // 匹配引号内容 "text"
-  const quoteRegex = /"([^"]+)"/g;
-  while ((match = quoteRegex.exec(text)) !== null) {
-    const overlaps = matches.some(m => 
-      (match.index >= m.start && match.index < m.end) || 
-      (match.index + match[0].length > m.start && match.index + match[0].length <= m.end)
-    );
-    if (!overlaps) {
-      matches.push({ start: match.index, end: match.index + match[0].length, content: match[1], type: 'quote' });
-    }
-  }
-  
-  // 按位置排序
-  matches.sort((a, b) => a.start - b.start);
-  
-  // 构建结果
-  matches.forEach((m, idx) => {
-    if (m.start > lastIndex) {
-      elements.push(<span key={`t${idx}`}>{text.slice(lastIndex, m.start)}</span>);
-    }
-    if (m.type === 'bold') {
-      elements.push(
-        <strong key={`b${idx}`} className="font-bold text-indigo-600 dark:text-indigo-300 bg-indigo-50 dark:bg-indigo-900/40 px-1 rounded">
-          {m.content}
-        </strong>
-      );
-    } else if (m.type === 'quote') {
-      elements.push(
-        <span key={`q${idx}`} className="text-emerald-600 dark:text-emerald-400 font-medium">"{m.content}"</span>
-      );
-    }
-    lastIndex = m.end;
-  });
-  
-  if (lastIndex < text.length) {
-    elements.push(<span key="last">{text.slice(lastIndex)}</span>);
-  }
-  
-  return elements.length > 0 ? elements : text;
-};
+const MarkdownContent = ({ content, className = '' }) => (
+  <Markdown
+    className={`markdown-content ${className}`}
+    components={{
+      h1: ({ children }) => <h1 className="text-xl font-bold mb-3 mt-4 first:mt-0 text-slate-800 dark:text-slate-100">{children}</h1>,
+      h2: ({ children }) => <h2 className="text-lg font-bold mb-2 mt-3 first:mt-0 text-slate-800 dark:text-slate-100">{children}</h2>,
+      h3: ({ children }) => <h3 className="text-base font-semibold mb-2 mt-3 first:mt-0 text-slate-700 dark:text-slate-200">{children}</h3>,
+      p: ({ children }) => <p className="mb-2 last:mb-0 leading-relaxed">{children}</p>,
+      ul: ({ children }) => <ul className="list-disc list-inside mb-2 space-y-1">{children}</ul>,
+      ol: ({ children }) => <ol className="list-decimal list-inside mb-2 space-y-1">{children}</ol>,
+      li: ({ children }) => <li className="leading-relaxed">{children}</li>,
+      strong: ({ children }) => <strong className="font-bold text-indigo-600 dark:text-indigo-300">{children}</strong>,
+      em: ({ children }) => <em className="italic text-slate-600 dark:text-slate-300">{children}</em>,
+      code: ({ children }) => <code className="px-1.5 py-0.5 rounded bg-slate-100 dark:bg-slate-700 text-sm font-mono text-emerald-600 dark:text-emerald-400">{children}</code>,
+      blockquote: ({ children }) => <blockquote className="border-l-4 border-indigo-500 pl-3 py-1 my-2 bg-slate-50 dark:bg-slate-800/50 rounded-r">{children}</blockquote>,
+    }}
+  >
+    {content}
+  </Markdown>
+);
 
-/**
- * 对话气泡组件
- */
 export const ChatBubble = ({ 
   role, 
   content, 
@@ -179,8 +135,8 @@ export const ChatBubble = ({
             ? 'bg-indigo-600 text-white rounded-br-md' 
             : 'bg-slate-100 dark:bg-slate-800 text-slate-800 dark:text-slate-200 rounded-bl-md'
         }`}>
-          <div className="whitespace-pre-wrap break-words text-[15px] leading-relaxed">
-            {formatChatContent(content, isUser)}
+          <div className="break-words text-[15px] leading-relaxed">
+            {isUser ? content : <MarkdownContent content={content} />}
             {isStreaming && (
               <span className="inline-block w-2 h-4 bg-current animate-pulse ml-0.5 opacity-50" />
             )}

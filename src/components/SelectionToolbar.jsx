@@ -70,50 +70,63 @@ export const SelectionToolbar = ({
   return createPortal(
     <div
       ref={toolbarRef}
-      className="fixed z-[60] animate-in fade-in zoom-in-95 duration-150"
-      style={{ top: position.top, left: position.left }}
+      className="fixed z-[60]"
+      style={{ 
+        top: position.top, 
+        left: position.left,
+        animation: 'toolbarAppear 0.25s cubic-bezier(0.34, 1.56, 0.64, 1) forwards',
+        opacity: 0,
+        transform: 'scale(0.9) translateY(-8px)'
+      }}
     >
-      <div className="bg-slate-900 dark:bg-slate-800 rounded-2xl shadow-xl border border-slate-700 dark:border-slate-600 overflow-hidden min-w-[180px]">
-        <div className="p-2 border-b border-slate-700 dark:border-slate-600">
+      <style>{`
+        @keyframes toolbarAppear {
+          0% { opacity: 0; transform: scale(0.9) translateY(-8px); }
+          100% { opacity: 1; transform: scale(1) translateY(0); }
+        }
+      `}</style>
+      <div className="bg-slate-900/95 dark:bg-slate-800/95 backdrop-blur-xl rounded-2xl shadow-2xl border border-slate-700/50 dark:border-slate-600/50 overflow-hidden min-w-[180px]">
+        <div className="p-2 border-b border-slate-700/50 dark:border-slate-600/50">
           <div className="flex items-center gap-1">
             <button
               onClick={onAskAI}
-              className="flex-1 flex items-center justify-center gap-1.5 px-3 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white text-sm font-medium transition-colors active:scale-[0.98]"
+              className="flex-1 flex items-center justify-center gap-1.5 px-3 py-2 rounded-xl bg-indigo-500 hover:bg-indigo-400 text-white text-sm font-medium transition-all duration-200 active:scale-[0.97] shadow-lg shadow-indigo-500/25"
             >
               <MessageCircle className="w-4 h-4" />
               问 AI
             </button>
-              <button
-                onClick={handleCopy}
-                className="p-2 rounded-xl hover:bg-slate-700 dark:hover:bg-slate-600 text-slate-300 transition-colors"
-                title="复制"
-              >
-              {copied ? <Check className="w-4 h-4 text-green-500" /> : <Copy className="w-4 h-4" />}
+            <button
+              onClick={handleCopy}
+              className="p-2 rounded-xl hover:bg-slate-700/70 dark:hover:bg-slate-600/70 text-slate-300 transition-all duration-200"
+              title="复制"
+            >
+              {copied ? <Check className="w-4 h-4 text-emerald-400" /> : <Copy className="w-4 h-4" />}
             </button>
           </div>
         </div>
         
-        <div className="p-2 space-y-1">
-          <div className="px-2 py-1 text-[10px] text-slate-400 uppercase tracking-wide flex items-center gap-1">
-              <Sparkles className="w-3 h-3" />
-              快捷追问
-            </div>
-            {QUICK_QUESTIONS.map((q) => (
-              <button
-                key={q.label}
-                onClick={() => handleQuickQuestion(q.label)}
-                className="w-full text-left px-3 py-2 rounded-lg text-sm text-slate-200 hover:bg-slate-700 dark:hover:bg-slate-600 transition-colors flex items-center gap-2"
-              >
-              <span>{q.icon}</span>
+        <div className="p-2 space-y-0.5">
+          <div className="px-2 py-1.5 text-[10px] text-slate-500 uppercase tracking-wider flex items-center gap-1.5">
+            <Sparkles className="w-3 h-3" />
+            快捷追问
+          </div>
+          {QUICK_QUESTIONS.map((q, index) => (
+            <button
+              key={q.label}
+              onClick={() => handleQuickQuestion(q.label)}
+              className="w-full text-left px-3 py-2.5 rounded-xl text-sm text-slate-200 hover:bg-slate-700/70 dark:hover:bg-slate-600/70 transition-all duration-200 flex items-center gap-2.5 group"
+              style={{ animationDelay: `${index * 30}ms` }}
+            >
+              <span className="transition-transform duration-200 group-hover:scale-110">{q.icon}</span>
               <span>{q.label}</span>
             </button>
           ))}
         </div>
       </div>
       
-        <div
-          className="absolute w-3 h-3 bg-slate-900 dark:bg-slate-800 border-t border-l border-slate-700 dark:border-slate-600 transform rotate-45 -top-1.5 left-1/2 -translate-x-1/2"
-        />
+      <div
+        className="absolute w-3 h-3 bg-slate-900/95 dark:bg-slate-800/95 border-t border-l border-slate-700/50 dark:border-slate-600/50 transform rotate-45 -top-1.5 left-1/2 -translate-x-1/2"
+      />
     </div>,
     document.body
   );

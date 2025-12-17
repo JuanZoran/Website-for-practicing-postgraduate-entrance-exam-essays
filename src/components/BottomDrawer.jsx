@@ -149,11 +149,28 @@ ${question}`;
   }, [input, selectedText, isStreaming, mode, data, modelText, sendMessage]);
 
   useEffect(() => {
-    if (isOpen && initialQuestion && !initialQuestionSentRef.current && !isStreaming) {
+    if (isOpen && initialQuestion && !initialQuestionSentRef.current) {
       initialQuestionSentRef.current = true;
-      handleSend(initialQuestion);
+      const quote = selectedText?.trim();
+      const prompt = `你是一位考研英语写作老师。请基于【范文】与【选中片段】回答用户问题。
+
+要求：
+1) 用中文回答
+2) 先解释含义（必要时给出更自然的译法）
+3) 再讲语法结构/用词亮点/可替换表达（给2-3个替换）
+4) 如选中片段有更地道写法，可给出改写版本
+
+【题目】
+${mode === 'letter' ? '小作文' : '大作文'} · ${data?.year || ''} ${data?.title || ''}
+
+【范文】
+${modelText || ''}
+
+${quote ? `【选中片段】\n${quote}\n\n` : ''}【用户问题】
+${initialQuestion}`;
+      sendMessage(prompt);
     }
-  }, [isOpen, initialQuestion, isStreaming, handleSend]);
+  }, [isOpen, initialQuestion, selectedText, mode, data, modelText, sendMessage]);
 
   const handleKeyDown = (e) => {
     if (e.key === 'Enter' && !e.shiftKey) {

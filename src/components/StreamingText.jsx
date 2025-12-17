@@ -99,24 +99,26 @@ export const StreamingFeedbackCard = ({
 };
 
 const MarkdownContent = ({ content, className = '' }) => (
-  <Markdown
-    className={`markdown-content ${className}`}
-    components={{
-      h1: ({ children }) => <h1 className="text-xl font-bold mb-3 mt-4 first:mt-0 text-slate-800 dark:text-slate-100">{children}</h1>,
-      h2: ({ children }) => <h2 className="text-lg font-bold mb-2 mt-3 first:mt-0 text-slate-800 dark:text-slate-100">{children}</h2>,
-      h3: ({ children }) => <h3 className="text-base font-semibold mb-2 mt-3 first:mt-0 text-slate-700 dark:text-slate-200">{children}</h3>,
-      p: ({ children }) => <p className="mb-2 last:mb-0 leading-relaxed">{children}</p>,
-      ul: ({ children }) => <ul className="list-disc list-inside mb-2 space-y-1">{children}</ul>,
-      ol: ({ children }) => <ol className="list-decimal list-inside mb-2 space-y-1">{children}</ol>,
-      li: ({ children }) => <li className="leading-relaxed">{children}</li>,
-      strong: ({ children }) => <strong className="font-bold text-indigo-600 dark:text-indigo-300">{children}</strong>,
-      em: ({ children }) => <em className="italic text-slate-600 dark:text-slate-300">{children}</em>,
-      code: ({ children }) => <code className="px-1.5 py-0.5 rounded bg-slate-100 dark:bg-slate-700 text-sm font-mono text-emerald-600 dark:text-emerald-400">{children}</code>,
-      blockquote: ({ children }) => <blockquote className="border-l-4 border-indigo-500 pl-3 py-1 my-2 bg-slate-50 dark:bg-slate-800/50 rounded-r">{children}</blockquote>,
-    }}
+  <div className={`markdown-content ${className}`}
   >
-    {content}
-  </Markdown>
+    <Markdown
+      components={{
+        h1: ({ children }) => <h1 className="text-xl font-bold mb-3 mt-4 first:mt-0 text-slate-800 dark:text-slate-100">{children}</h1>,
+        h2: ({ children }) => <h2 className="text-lg font-bold mb-2 mt-3 first:mt-0 text-slate-800 dark:text-slate-100">{children}</h2>,
+        h3: ({ children }) => <h3 className="text-base font-semibold mb-2 mt-3 first:mt-0 text-slate-700 dark:text-slate-200">{children}</h3>,
+        p: ({ children }) => <p className="mb-2 last:mb-0 leading-relaxed">{children}</p>,
+        ul: ({ children }) => <ul className="list-disc list-inside mb-2 space-y-1">{children}</ul>,
+        ol: ({ children }) => <ol className="list-decimal list-inside mb-2 space-y-1">{children}</ol>,
+        li: ({ children }) => <li className="leading-relaxed">{children}</li>,
+        strong: ({ children }) => <strong className="font-bold text-indigo-600 dark:text-indigo-300">{children}</strong>,
+        em: ({ children }) => <em className="italic text-slate-600 dark:text-slate-300">{children}</em>,
+        code: ({ children }) => <code className="px-1.5 py-0.5 rounded bg-slate-100 dark:bg-slate-700 text-sm font-mono text-emerald-600 dark:text-emerald-400">{children}</code>,
+        blockquote: ({ children }) => <blockquote className="border-l-4 border-indigo-500 pl-3 py-1 my-2 bg-slate-50 dark:bg-slate-800/50 rounded-r">{children}</blockquote>,
+      }}
+    >
+      {content}
+    </Markdown>
+  </div>
 );
 
 export const ChatBubble = ({ 

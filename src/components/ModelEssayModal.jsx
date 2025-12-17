@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { BookOpen, ChevronDown, ChevronUp, Copy, GitBranch, MessageCircle, X, XCircle } from 'lucide-react';
 import { ChatList } from './StreamingText';
 import { InlineError } from './ErrorDisplay';
@@ -7,6 +7,7 @@ import { getBuiltInEssayModel, getBuiltInLetterModel } from '../services/modelTe
 
 const ModelEssayModal = ({ isOpen, onClose, data, mode = 'essay' }) => {
   const contentRef = useRef(null);
+  const selectionRafRef = useRef(null);
   const [selectedText, setSelectedText] = useState('');
   const [askInput, setAskInput] = useState('');
   const [askOpen, setAskOpen] = useState(false);
@@ -158,8 +159,7 @@ const ModelEssayModal = ({ isOpen, onClose, data, mode = 'essay' }) => {
       // ignore
     }
   };
-
-  const updateSelection = () => {
+  const updateSelection = useCallback(() => {
     if (!isOpen) return;
     const selection = window.getSelection?.();
     if (!selection || selection.isCollapsed) {
@@ -182,10 +182,26 @@ const ModelEssayModal = ({ isOpen, onClose, data, mode = 'essay' }) => {
 
     const text = selection.toString().trim();
     setSelectedText(text.slice(0, 800));
-  };
+  }, [isOpen]);
+
+  const scheduleSelectionUpdate = useCallback(() => {
+    if (!isOpen) return;
+    if (selectionRafRef.current) {
+      cancelAnimationFrame(selectionRafRef.current);
+    }
+    selectionRafRef.current = requestAnimationFrame(() => {
+      selectionRafRef.current = null;
+      updateSelection();
+    });
+  }, [isOpen, updateSelection]);
+
 
   useEffect(() => {
     if (!isOpen) return;
+    if (selectionRafRef.current) {
+      cancelAnimationFrame(selectionRafRef.current);
+      selectionRafRef.current = null;
+    }
     setSelectedText('');
     setAskInput('');
     setAskOpen(false);
@@ -193,6 +209,23 @@ const ModelEssayModal = ({ isOpen, onClose, data, mode = 'essay' }) => {
     setHighlight(null);
     setMobileTab('content');
   }, [isOpen, data?.id]);
+
+  useEffect(() => {
+    if (!isOpen) return;
+
+    const handleSelectionChange = () => {
+      scheduleSelectionUpdate();
+    };
+
+    document.addEventListener('selectionchange', handleSelectionChange);
+    return () => {
+      document.removeEventListener('selectionchange', handleSelectionChange);
+      if (selectionRafRef.current) {
+        cancelAnimationFrame(selectionRafRef.current);
+        selectionRafRef.current = null;
+      }
+    };
+  }, [isOpen, scheduleSelectionUpdate]);
 
   useEffect(() => {
     if (!isOpen) return;
@@ -282,7 +315,7 @@ ${question}`;
         onClick={onClose}
       />
       <div className="fixed inset-x-0 bottom-0 md:top-16 md:bottom-4 md:right-4 md:left-auto z-50 p-0 md:p-0">
-        <div className="bg-white dark:bg-slate-900 rounded-t-3xl md:rounded-3xl w-full md:w-[640px] lg:w-[720px] shadow-2xl animate-modelPanel overflow-hidden max-h-[92vh] md:max-h-none md:h-full flex flex-col border border-slate-100 dark:border-slate-800">
+        <div className="bg-white dark:bg-slate-900 rounded-t-3xl md:rounded-3xl w-full md:w-[640px] lg:w-[720px] shadow-2xl animate-modelPanel overflow-hidden max-h-[92vh] max-h-[92dvh] md:max-h-none md:h-full flex flex-col border border-slate-100 dark:border-slate-800">
           <div className="md:hidden flex justify-center pt-3 pb-1">
             <div className="w-12 h-1.5 rounded-full bg-slate-200 dark:bg-slate-700" />
           </div>
@@ -495,9 +528,9 @@ ${question}`;
 
             <div
               ref={contentRef}
-              onMouseUp={updateSelection}
-              onKeyUp={updateSelection}
-              onTouchEnd={updateSelection}
+              onMouseUp={scheduleSelectionUpdate}
+              onKeyUp={scheduleSelectionUpdate}
+              onTouchEnd={scheduleSelectionUpdate}
               className={`${mobileTab === 'content' ? '' : 'hidden'} md:block p-4 bg-slate-50 dark:bg-slate-800/50 rounded-2xl border border-slate-200 dark:border-slate-700 flex-1 overflow-auto break-words text-[15px] leading-relaxed font-serif md:min-h-0 custom-scrollbar`}
             >
               <div className="mx-auto w-full max-w-[72ch]">

@@ -145,7 +145,7 @@ export const FollowUpChat = ({
         <div className="border-t border-slate-200 dark:border-slate-700">
           {/* 对话列表 */}
           {(messages.length > 0 || isStreaming) && (
-            <div className="p-4 max-h-[300px] overflow-y-auto">
+            <div className="p-4 max-h-[45vh] md:max-h-[300px] overflow-y-auto">
               <ChatList
                 messages={messages}
                 streamingContent={streamingContent}
@@ -162,7 +162,7 @@ export const FollowUpChat = ({
           )}
 
           {/* 输入区域 */}
-          <div className="p-3 border-t border-slate-100 dark:border-slate-800">
+          <div className="p-3 pb-safe border-t border-slate-100 dark:border-slate-800">
             <FollowUpInput
               onSend={handleSend}
               isLoading={isStreaming}

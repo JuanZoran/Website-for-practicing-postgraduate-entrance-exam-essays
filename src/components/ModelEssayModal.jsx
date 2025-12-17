@@ -19,6 +19,7 @@ const ModelEssayModal = ({ isOpen, onClose, data, mode = 'essay' }) => {
   const [mobileTab, setMobileTab] = useState('content');
   const [showSelectionToolbar, setShowSelectionToolbar] = useState(false);
   const [showBottomDrawer, setShowBottomDrawer] = useState(false);
+  const [initialQuestion, setInitialQuestion] = useState('');
   const isMobile = useIsMobile();
 
   const modelView = useMemo(() => {
@@ -339,11 +340,13 @@ ${question}`;
 
   const handleOpenDrawer = () => {
     setShowSelectionToolbar(false);
+    setInitialQuestion('');
     setShowBottomDrawer(true);
   };
 
   const handleQuickQuestion = (question) => {
     setShowSelectionToolbar(false);
+    setInitialQuestion(question);
     setShowBottomDrawer(true);
   };
 
@@ -753,14 +756,18 @@ ${question}`;
               selectedText={selectedText}
             />
             <BottomDrawer
-              isOpen={showBottomDrawer}
-              onClose={() => setShowBottomDrawer(false)}
-              selectedText={selectedText}
-              contextId={askContextId}
-              mode={mode}
-              data={data}
-              modelText={modelView.text}
-            />
+                isOpen={showBottomDrawer}
+                onClose={() => {
+                  setShowBottomDrawer(false);
+                  setInitialQuestion('');
+                }}
+                selectedText={selectedText}
+                contextId={askContextId}
+                mode={mode}
+                data={data}
+                modelText={modelView.text}
+                initialQuestion={initialQuestion}
+              />
           </>
         )}
       </>

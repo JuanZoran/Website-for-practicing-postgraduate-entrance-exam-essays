@@ -18,7 +18,8 @@ export const BottomDrawer = ({
   contextId,
   mode = 'essay',
   data,
-  modelText
+  modelText,
+  initialQuestion = ''
 }) => {
   const [drawerHeight, setDrawerHeight] = useState(50);
   const [isDragging, setIsDragging] = useState(false);
@@ -39,10 +40,13 @@ export const BottomDrawer = ({
 
   const [keyboardHeight, setKeyboardHeight] = useState(0);
 
+  const initialQuestionSentRef = useRef(false);
+
   useEffect(() => {
     if (isOpen) {
       setDrawerHeight(50);
       setTimeout(() => inputRef.current?.focus(), 100);
+      initialQuestionSentRef.current = false;
     }
   }, [isOpen]);
 
@@ -114,7 +118,7 @@ export const BottomDrawer = ({
     };
   }, [isDragging, handleDragMove, handleDragEnd]);
 
-  const handleSend = async (questionText) => {
+  const handleSend = useCallback(async (questionText) => {
     const question = questionText || input.trim();
     const quote = selectedText?.trim();
     if (!question || isStreaming) return;
@@ -142,7 +146,14 @@ ${question}`;
     } catch {
       // error handled by hook
     }
-  };
+  }, [input, selectedText, isStreaming, mode, data, modelText, sendMessage]);
+
+  useEffect(() => {
+    if (isOpen && initialQuestion && !initialQuestionSentRef.current && !isStreaming) {
+      initialQuestionSentRef.current = true;
+      handleSend(initialQuestion);
+    }
+  }, [isOpen, initialQuestion, isStreaming, handleSend]);
 
   const handleKeyDown = (e) => {
     if (e.key === 'Enter' && !e.shiftKey) {

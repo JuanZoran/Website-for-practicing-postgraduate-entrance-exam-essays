@@ -165,12 +165,12 @@ const ModelEssayModal = ({ isOpen, onClose, data, mode = 'essay' }) => {
       // ignore
     }
   };
-  const updateSelection = useCallback(() => {
+  const updateSelection = useCallback((showToolbar = false) => {
     if (!isOpen) return;
     const selection = window.getSelection?.();
     if (!selection || selection.isCollapsed) {
       setSelectedText('');
-      setShowSelectionToolbar(false);
+      if (showToolbar) setShowSelectionToolbar(false);
       return;
     }
 
@@ -179,25 +179,25 @@ const ModelEssayModal = ({ isOpen, onClose, data, mode = 'essay' }) => {
     const container = contentRef.current;
     if (!container || !anchorNode || !focusNode) {
       setSelectedText('');
-      setShowSelectionToolbar(false);
+      if (showToolbar) setShowSelectionToolbar(false);
       return;
     }
 
     if (!container.contains(anchorNode) || !container.contains(focusNode)) {
       setSelectedText('');
-      setShowSelectionToolbar(false);
+      if (showToolbar) setShowSelectionToolbar(false);
       return;
     }
 
     const text = selection.toString().trim();
     if (text) {
       setSelectedText(text.slice(0, 800));
-      if (isMobile) {
+      if (showToolbar && isMobile) {
         setShowSelectionToolbar(true);
       }
     } else {
       setSelectedText('');
-      setShowSelectionToolbar(false);
+      if (showToolbar) setShowSelectionToolbar(false);
     }
   }, [isOpen, isMobile]);
 
@@ -236,15 +236,25 @@ const ModelEssayModal = ({ isOpen, onClose, data, mode = 'essay' }) => {
       scheduleSelectionUpdate();
     };
 
+    const handleSelectionEnd = () => {
+      setTimeout(() => {
+        updateSelection(true);
+      }, 50);
+    };
+
     document.addEventListener('selectionchange', handleSelectionChange);
+    document.addEventListener('mouseup', handleSelectionEnd);
+    document.addEventListener('touchend', handleSelectionEnd);
     return () => {
       document.removeEventListener('selectionchange', handleSelectionChange);
+      document.removeEventListener('mouseup', handleSelectionEnd);
+      document.removeEventListener('touchend', handleSelectionEnd);
       if (selectionRafRef.current) {
         cancelAnimationFrame(selectionRafRef.current);
         selectionRafRef.current = null;
       }
     };
-  }, [isOpen, scheduleSelectionUpdate]);
+  }, [isOpen, scheduleSelectionUpdate, updateSelection]);
 
   useEffect(() => {
     if (!isOpen) return;

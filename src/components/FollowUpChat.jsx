@@ -4,9 +4,11 @@
  */
 
 import { useState, useRef, useEffect } from 'react';
-import { Send, RotateCcw, ChevronDown, ChevronUp, MessageCircle, Loader } from 'lucide-react';
+import { createPortal } from 'react-dom';
+import { Send, RotateCcw, ChevronDown, ChevronUp, MessageCircle, Loader, X } from 'lucide-react';
 import { ChatList } from './StreamingText';
 import { useAIChat } from '../hooks/useAIChat';
+import { useIsMobile } from '../hooks/useMobile';
 
 /**
  * 追问输入框

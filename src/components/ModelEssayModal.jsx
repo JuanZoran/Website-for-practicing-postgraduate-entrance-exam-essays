@@ -340,12 +340,15 @@ ${question}`;
 
   const handleOpenDrawer = () => {
     setShowSelectionToolbar(false);
+    window.getSelection()?.removeAllRanges();
     setInitialQuestion('');
     setShowBottomDrawer(true);
   };
 
   const handleQuickQuestion = (question) => {
+    // 先关闭 toolbar，清除选区防止重新触发
     setShowSelectionToolbar(false);
+    window.getSelection()?.removeAllRanges();
     setInitialQuestion(question);
     setShowBottomDrawer(true);
   };
